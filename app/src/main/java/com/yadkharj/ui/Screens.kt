@@ -296,6 +296,7 @@ fun ReportScreen(all: List<Tx>, toman: Boolean) {
 
         SliceSection("خرج‌ها بر اساس دلیل", report.expenseSlices, report.expense, P.expense, toman)
         SliceSection("درآمدها بر اساس دلیل", report.incomeSlices, report.income, P.income, toman)
+        SliceSection("خرج‌ها بر اساس دسته", remember(all, period) { com.yadkharj.domain.Categories.slices(all, period, com.yadkharj.domain.Categories.load(rctx)) }, report.expense, P.expense, toman)
 
         if (report.pendingCount > 0) {
             Txt(
@@ -478,6 +479,9 @@ fun SettingsScreen(all: List<Tx>, toman: Boolean, onToman: (Boolean) -> Unit, pe
 
         Spacer(Modifier.height(28.dp))
         BudgetEditor(toman)
+
+        Spacer(Modifier.height(28.dp))
+        CategoryEditor(all)
 
         Spacer(Modifier.height(28.dp))
         RecurringEditor(toman)
