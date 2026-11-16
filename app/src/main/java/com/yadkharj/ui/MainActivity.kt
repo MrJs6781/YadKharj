@@ -86,7 +86,7 @@ class MainActivity : ComponentActivity() {
         enableEdgeToEdge()
         Notifier.ensureChannel(this)
         com.yadkharj.domain.RecurringStore.schedule(this)
-        setContent { AppTheme { App() } }
+        setContent { AppTheme { AppLockGate { App() } } }
     }
 }
 
