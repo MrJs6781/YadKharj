@@ -16,20 +16,12 @@ jobs:
           distribution: temurin
           java-version: '17'
 
-      - name: Download Vazirmatn font
-        run: |
-          mkdir -p app/src/main/res/font
-          for w in Regular Medium Bold; do
-            lw=$(echo "$w" | tr 'A-Z' 'a-z')
-            out="app/src/main/res/font/vazirmatn_${lw}.ttf"
-            curl -fsSL "https://raw.githubusercontent.com/rastikerdar/vazirmatn/master/fonts/ttf/Vazirmatn-${w}.ttf" -o "$out" \
-              || curl -fsSL "https://cdn.jsdelivr.net/gh/rastikerdar/vazirmatn/fonts/ttf/Vazirmatn-${w}.ttf" -o "$out"
-          done
-          ls -la app/src/main/res/font
-
       - uses: gradle/actions/setup-gradle@v4
         with:
           gradle-version: '8.7'
+
+      - name: Unit tests
+        run: gradle testDebugUnitTest --no-daemon --stacktrace
 
       - name: Build debug APK
         run: gradle assembleDebug --no-daemon --stacktrace
