@@ -47,13 +47,21 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import com.yadkharj.data.Tx
+import com.yadkharj.domain.Budgets
 import com.yadkharj.domain.DayBar
+import com.yadkharj.domain.Delta
 import com.yadkharj.domain.Fmt
 import com.yadkharj.domain.Periods
 import com.yadkharj.domain.Perms
+import android.content.pm.PackageManager
+import androidx.core.content.ContextCompat
+import com.yadkharj.domain.SmsImport
+import com.yadkharj.domain.Recurring
+import com.yadkharj.domain.RecurringStore
 import com.yadkharj.domain.Report
 import com.yadkharj.domain.Reports
 import com.yadkharj.domain.Slice
+import com.yadkharj.domain.TxFilter
 import com.yadkharj.domain.TxProcessor
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
@@ -80,8 +88,14 @@ private fun buildEntries(list: List<Tx>): List<Entry> {
 @Composable
 fun TxScreen(all: List<Tx>, toman: Boolean, smsGranted: Boolean, onEdit: (Tx) -> Unit, onOpenSettings: () -> Unit) {
     var onlyPending by rememberSaveable { mutableStateOf(false) }
+    var query by rememberSaveable { mutableStateOf("") }
+    var days by rememberSaveable { mutableIntStateOf(0) }
+    var minTxt by rememberSaveable { mutableStateOf("") }
+    var maxTxt by rememberSaveable { mutableStateOf("") }
+    var showFilters by rememberSaveable { mutableStateOf(false) }
     val pending = all.count { it.reason == null }
-    val entries = remember(all, onlyPending) { buildEntries(if (onlyPending) all.filter { it.reason == null } else all) }
+    val filter = TxFilter(query, days, TxFilter.rial(minTxt, toman), TxFilter.rial(maxTxt, toman), onlyPending)
+    val entries = remember(all, filter) { buildEntries(filter.apply(all)) }
 
     LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(horizontal = 20.dp, vertical = 12.dp)) {
         item {
@@ -93,6 +107,36 @@ fun TxScreen(all: List<Tx>, toman: Boolean, smsGranted: Boolean, onEdit: (Tx) ->
                     Chip("همه", selected = !onlyPending) { onlyPending = false }
                     val p = if (pending > 0) " · ${Fmt.digits(pending.toString())}" else ""
                     Chip("بدون دلیل$p", selected = onlyPending) { onlyPending = true }
+                    Chip(if (filter.active) "فیلتر ●" else "فیلتر", selected = showFilters) { showFilters = !showFilters }
+                }
+                Spacer(Modifier.height(10.dp))
+                Field(query, { query = it }, "جستجو در دلیل‌ها…", Modifier.fillMaxWidth())
+                if (showFilters) {
+                    Spacer(Modifier.height(10.dp))
+                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        Chip("همه تاریخ‌ها", selected = days == 0) { days = 0 }
+                        Chip("۷ روز اخیر", selected = days == 7) { days = 7 }
+                        Chip("۳۰ روز اخیر", selected = days == 30) { days = 30 }
+                    }
+                    Spacer(Modifier.height(10.dp))
+                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        Field(minTxt, { minTxt = it }, "حداقل مبلغ (${Fmt.unit(toman)})", Modifier.weight(1f), number = true)
+                        Field(maxTxt, { maxTxt = it }, "حداکثر مبلغ", Modifier.weight(1f), number = true)
+                    }
+                }
+            }
+        }
+        val balances = all.filter { it.balance != null }.groupBy { it.card }.map { (c, l) -> c to l.maxByOrNull { it.timestamp }!! }
+        if (balances.isNotEmpty()) {
+            item {
+                Column(Modifier.fillMaxWidth().padding(bottom = 12.dp).clip(RoundedCornerShape(20.dp)).background(P.surface).padding(18.dp)) {
+                    Txt("آخرین مانده", size = 12, color = P.muted)
+                    balances.forEach { (c, t) ->
+                        Row(Modifier.padding(top = 6.dp)) {
+                            Txt(c?.let { "کارت ${Fmt.digits(it)}" } ?: "حساب", size = 13, modifier = Modifier.weight(1f))
+                            Txt("${Fmt.money(t.balance!!, toman)} ${Fmt.unit(toman)}", size = 13, weight = FontWeight.Medium)
+                        }
+                    }
                 }
             }
         }
@@ -110,7 +154,7 @@ fun TxScreen(all: List<Tx>, toman: Boolean, smsGranted: Boolean, onEdit: (Tx) ->
         if (entries.isEmpty()) {
             item {
                 Txt(
-                    if (onlyPending) "همهٔ تراکنش‌ها دلیل دارن 👌" else "هنوز تراکنشی نیست.\nوقتی پیامک بانکی بیاد، خودکار اینجا ثبت می‌شه.",
+                    if (filter.active) "چیزی پیدا نشد." else if (onlyPending) "همهٔ تراکنش‌ها دلیل دارن 👌" else "هنوز تراکنشی نیست.\nوقتی پیامک بانکی بیاد، خودکار اینجا ثبت می‌شه.",
                     size = 14, color = P.muted, align = TextAlign.Center,
                     modifier = Modifier.fillMaxWidth().padding(top = 80.dp)
                 )
@@ -141,7 +185,8 @@ private fun TxRow(tx: Tx, toman: Boolean, onClick: () -> Unit) {
             } else {
                 Txt("بدون دلیل — لمس کن", size = 14, color = P.warn, weight = FontWeight.Medium, maxLines = 1)
             }
-            Txt("${Fmt.time(tx.timestamp)} · ${if (tx.isIncome) "واریز" else "برداشت"}", size = 12, color = P.muted)
+            val cardTag = tx.card?.let { " · کارت ${Fmt.digits(it)}" }.orEmpty()
+            Txt("${Fmt.time(tx.timestamp)} · ${if (tx.isIncome) "واریز" else "برداشت"}$cardTag", size = 12, color = P.muted)
         }
         Spacer(Modifier.width(12.dp))
         Row(verticalAlignment = Alignment.CenterVertically) {
@@ -160,10 +205,17 @@ private fun TxRow(tx: Tx, toman: Boolean, onClick: () -> Unit) {
 fun ReportScreen(all: List<Tx>, toman: Boolean) {
     var mode by rememberSaveable { mutableIntStateOf(0) }
     var offset by rememberSaveable { mutableIntStateOf(0) }
-    val today = remember { LocalDate.now() }
-    val period = remember(mode, offset) { if (mode == 0) Periods.week(offset, today) else Periods.month(offset, today) }
+    val today = remember(all) { LocalDate.now() }
+    val period = remember(mode, offset, today) { if (mode == 0) Periods.week(offset, today) else Periods.month(offset, today) }
     val report = remember(all, period) { Reports.build(all, period) }
     val net = report.income - report.expense
+    val deltas = remember(all, offset, mode) {
+        if (mode == 1) Reports.compare(all, period, Periods.month(offset - 1, today)) else emptyList()
+    }
+    val rctx = LocalContext.current
+    val budgetStatus = remember(all, period, mode) {
+        if (mode == 1) Budgets.status(Budgets.load(rctx), all, period) else emptyList()
+    }
 
     Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(horizontal = 20.dp)) {
         Spacer(Modifier.height(16.dp))
@@ -200,6 +252,22 @@ fun ReportScreen(all: List<Tx>, toman: Boolean) {
             Txt(Fmt.unit(toman), size = 11, color = P.muted)
         }
 
+        if (budgetStatus.isNotEmpty()) {
+            Spacer(Modifier.height(20.dp))
+            Column(Modifier.fillMaxWidth().clip(RoundedCornerShape(24.dp)).background(P.surface).padding(18.dp)) {
+                Txt("بودجه", size = 12, color = P.muted)
+                budgetStatus.forEach { BudgetRow(it, toman) }
+            }
+        }
+
+        if (deltas.isNotEmpty()) {
+            Spacer(Modifier.height(20.dp))
+            Column(Modifier.fillMaxWidth().clip(RoundedCornerShape(24.dp)).background(P.surface).padding(18.dp)) {
+                Txt("نسبت به ماه قبل", size = 12, color = P.muted)
+                deltas.forEach { DeltaRow(it) }
+            }
+        }
+
         Spacer(Modifier.height(20.dp))
         Column(Modifier.fillMaxWidth().clip(RoundedCornerShape(24.dp)).background(P.surface).padding(18.dp)) {
             Bars(report.bars)
@@ -222,6 +290,36 @@ fun ReportScreen(all: List<Tx>, toman: Boolean) {
             )
         }
         Spacer(Modifier.height(32.dp))
+    }
+}
+
+@Composable
+private fun DeltaRow(d: Delta) {
+    val up = d.cur > d.prev
+    val same = d.cur == d.prev
+    val text = when {
+        same -> "بدون تغییر"
+        d.pct == null -> "جدید"
+        else -> "${Fmt.digits(Math.abs(d.pct!!).toString())}٪ ${if (up) "بیشتر" else "کمتر"}"
+    }
+    Spacer(Modifier.height(10.dp))
+    Row {
+        Txt(d.label, size = 13, modifier = Modifier.weight(1f), maxLines = 1)
+        Txt(text, size = 13, color = if (same) P.muted else if (up) P.expense else P.income)
+    }
+}
+
+@Composable
+private fun BudgetRow(st: Budgets.Status, toman: Boolean) {
+    val tone = when { st.ratio >= 1 -> P.expense; st.ratio >= Budgets.WARN -> P.warn; else -> P.income }
+    Spacer(Modifier.height(12.dp))
+    Row {
+        Txt(st.label, size = 13, modifier = Modifier.weight(1f), maxLines = 1)
+        Txt("${Fmt.money(st.spent, toman)} از ${Fmt.money(st.limit, toman)} ${Fmt.unit(toman)}", size = 12, color = tone)
+    }
+    Spacer(Modifier.height(6.dp))
+    Box(Modifier.fillMaxWidth().height(6.dp).clip(RoundedCornerShape(3.dp)).background(P.bg)) {
+        Box(Modifier.fillMaxWidth(st.ratio.toFloat().coerceIn(0.02f, 1f)).height(6.dp).clip(RoundedCornerShape(3.dp)).background(tone))
     }
 }
 
@@ -318,7 +416,17 @@ private fun SliceSection(title: String, slices: List<Slice>, total: Long, tone: 
 fun SettingsScreen(toman: Boolean, onToman: (Boolean) -> Unit, permTick: Int, onChanged: () -> Unit) {
     val ctx = LocalContext.current
     val scope = rememberCoroutineScope()
-    val launcher = rememberLauncherForActivityResult(ActivityResultContracts.RequestMultiplePermissions()) { onChanged() }
+    val launcher = rememberLauncherForActivityResult(ActivityResultContracts.RequestMultiplePermissions()) { res ->
+        onChanged()
+        // اندروید ۱۳+: برای APKِ نصب‌شده از فایل، مجوز پیامک «محدود» است و دیالوگ بدون نمایش گزینه رد می‌شود.
+        // گزینهٔ «Allow restricted settings» فقط در صفحهٔ اطلاعات برنامه (سه‌نقطه) پیدا می‌شود؛ مستقیم بازش می‌کنیم.
+        if (res[Manifest.permission.RECEIVE_SMS] == false && !Perms.sms(ctx)) {
+            ctx.startActivity(
+                Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS, Uri.parse("package:${ctx.packageName}"))
+                    .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+            )
+        }
+    }
     var testSent by remember { mutableStateOf(false) }
 
     Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(horizontal = 20.dp)) {
@@ -341,9 +449,18 @@ fun SettingsScreen(toman: Boolean, onToman: (Boolean) -> Unit, permTick: Int, on
             )
         }
         Txt(
-            "اگه گزینهٔ دسترسی پیامک خاکستری بود: تنظیمات گوشی ← برنامه‌ها ← یادخرج ← سه‌نقطهٔ بالا ← «Allow restricted settings».",
+            "اگه گفت «App was denied access»: بعد از رد شدن، صفحهٔ اطلاعات برنامه باز می‌شه ← سه‌نقطهٔ بالا ← «Allow restricted settings» ← برگرد و دوباره «فعال‌سازی» رو بزن.",
             size = 11, color = P.muted, modifier = Modifier.padding(top = 8.dp)
         )
+
+        Spacer(Modifier.height(28.dp))
+        ImportRow()
+
+        Spacer(Modifier.height(28.dp))
+        BudgetEditor(toman)
+
+        Spacer(Modifier.height(28.dp))
+        RecurringEditor(toman)
 
         Spacer(Modifier.height(28.dp))
         Txt("واحد نمایش مبلغ", size = 12, color = P.muted)
@@ -366,6 +483,101 @@ fun SettingsScreen(toman: Boolean, onToman: (Boolean) -> Unit, permTick: Int, on
         Txt("همهٔ داده‌ها فقط روی همین گوشی ذخیره می‌شن و جایی ارسال نمی‌شن.", size = 11, color = P.muted)
         Spacer(Modifier.height(32.dp))
     }
+}
+
+@Composable
+private fun BudgetEditor(toman: Boolean) {
+    val ctx = LocalContext.current
+    var budgets by remember { mutableStateOf(Budgets.load(ctx)) }
+    var reason by remember { mutableStateOf("") }
+    var amount by remember { mutableStateOf("") }
+    val rial = TxFilter.rial(amount, toman)
+    fun update(m: Map<String, Long>) { budgets = m; Budgets.save(ctx, m) }
+
+    Txt("سقف بودجهٔ ماهانه", size = 12, color = P.muted)
+    Spacer(Modifier.height(8.dp))
+    budgets.forEach { (k, v) ->
+        Row(Modifier.fillMaxWidth().padding(bottom = 8.dp).clip(RoundedCornerShape(18.dp)).background(P.surface).padding(16.dp), verticalAlignment = Alignment.CenterVertically) {
+            Txt(if (k == Budgets.TOTAL) "کل ماه" else k, size = 14, modifier = Modifier.weight(1f), maxLines = 1)
+            Txt("${Fmt.money(v, toman)} ${Fmt.unit(toman)}", size = 12, color = P.muted)
+            Txt("  حذف", size = 12, color = P.warn, modifier = Modifier.clickable { update(budgets - k) })
+        }
+    }
+    Field(reason, { reason = it }, "دلیل (خالی = کل ماه)", Modifier.fillMaxWidth())
+    Spacer(Modifier.height(8.dp))
+    Field(amount, { amount = it }, "سقف (${Fmt.unit(toman)})", Modifier.fillMaxWidth(), number = true)
+    Spacer(Modifier.height(8.dp))
+    Pill("افزودن سقف", filled = false, enabled = rial != null && rial > 0, modifier = Modifier.fillMaxWidth()) {
+        update(budgets + (reason.trim() to rial!!)); reason = ""; amount = ""
+    }
+    Txt("وقتی خرج به ۸۰٪ یا ۱۰۰٪ سقف برسه، اعلان می‌گیری.", size = 11, color = P.muted, modifier = Modifier.padding(top = 8.dp))
+}
+
+@Composable
+private fun ImportRow() {
+    val ctx = LocalContext.current
+    val scope = rememberCoroutineScope()
+    var msg by remember { mutableStateOf<String?>(null) }
+    var busy by remember { mutableStateOf(false) }
+    fun go() {
+        busy = true
+        scope.launch(Dispatchers.IO) {
+            val n = runCatching { SmsImport.run(ctx.applicationContext) }.getOrNull()
+            msg = if (n == null) "خواندن پیامک‌ها ناموفق بود." else if (n == 0) "تراکنش جدیدی پیدا نشد." else "${Fmt.digits(n.toString())} تراکنش وارد شد."
+            busy = false
+        }
+    }
+    val launcher = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { ok ->
+        if (ok) go() else {
+            msg = "دسترسی داده نشد. اگه «App was denied access» دیدی: اطلاعات برنامه ← سه‌نقطه ← Allow restricted settings."
+            ctx.startActivity(
+                Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS, Uri.parse("package:${ctx.packageName}")).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+            )
+        }
+    }
+    Txt("پیامک‌های قدیمی", size = 12, color = P.muted)
+    Spacer(Modifier.height(8.dp))
+    Pill(if (busy) "در حال خواندن…" else "واردکردن از صندوق پیامک", filled = false, enabled = !busy, modifier = Modifier.fillMaxWidth()) {
+        if (ContextCompat.checkSelfPermission(ctx, Manifest.permission.READ_SMS) == PackageManager.PERMISSION_GRANTED) go()
+        else launcher.launch(Manifest.permission.READ_SMS)
+    }
+    msg?.let { Txt(it, size = 11, color = P.muted, modifier = Modifier.padding(top = 8.dp)) }
+}
+
+@Composable
+private fun RecurringEditor(toman: Boolean) {
+    val ctx = LocalContext.current
+    var items by remember { mutableStateOf(RecurringStore.load(ctx)) }
+    var title by remember { mutableStateOf("") }
+    var amount by remember { mutableStateOf("") }
+    var day by remember { mutableStateOf("") }
+    val rial = TxFilter.rial(amount, toman)
+    val d = TxFilter.rial(day, false)?.toInt()
+    fun update(l: List<Recurring>) { items = l; RecurringStore.save(ctx, l) }
+
+    Txt("پرداخت‌های تکراری (یادآور)", size = 12, color = P.muted)
+    Spacer(Modifier.height(8.dp))
+    items.forEach { r ->
+        Row(Modifier.fillMaxWidth().padding(bottom = 8.dp).clip(RoundedCornerShape(18.dp)).background(P.surface).padding(16.dp), verticalAlignment = Alignment.CenterVertically) {
+            Column(Modifier.weight(1f)) {
+                Txt(r.title, size = 14, maxLines = 1)
+                Txt("هر ماه روز ${Fmt.digits(r.day.toString())} · ${Fmt.money(r.amount, toman)} ${Fmt.unit(toman)}", size = 11, color = P.muted)
+            }
+            Txt("حذف", size = 12, color = P.warn, modifier = Modifier.clickable { update(items - r) })
+        }
+    }
+    Field(title, { title = it }, "عنوان (مثلاً اجاره)", Modifier.fillMaxWidth())
+    Spacer(Modifier.height(8.dp))
+    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+        Field(amount, { amount = it }, "مبلغ (${Fmt.unit(toman)})", Modifier.weight(1f), number = true)
+        Field(day, { day = it }, "روز ماه (۱–۳۱)", Modifier.weight(1f), number = true)
+    }
+    Spacer(Modifier.height(8.dp))
+    val ok = title.isNotBlank() && rial != null && rial > 0 && d != null && d in 1..31
+    Pill("افزودن یادآور", filled = false, enabled = ok, modifier = Modifier.fillMaxWidth()) {
+        update(items + Recurring(title.trim(), rial!!, d!!)); title = ""; amount = ""; day = ""
+    }
+    Txt("یک روز قبل و روز سررسید، ساعت ۹ صبح اعلان می‌گیری.", size = 11, color = P.muted, modifier = Modifier.padding(top = 8.dp))
 }
 
 @Composable

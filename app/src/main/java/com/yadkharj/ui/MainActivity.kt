@@ -7,6 +7,8 @@ import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.horizontalScroll
+import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -18,6 +20,7 @@ import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
@@ -43,6 +46,8 @@ import androidx.lifecycle.viewModelScope
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.yadkharj.data.AppDb
 import com.yadkharj.data.Tx
+import com.yadkharj.domain.Budgets
+import com.yadkharj.domain.Fmt
 import com.yadkharj.domain.Notifier
 import com.yadkharj.domain.Perms
 import com.yadkharj.domain.Prefs
@@ -56,12 +61,15 @@ class MainVm(app: Application) : AndroidViewModel(app) {
     val all = dao.observeAll().stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
 
     fun setReason(id: Long, reason: String) {
-        viewModelScope.launch { dao.setReason(id, reason.trim().ifEmpty { null }) }
+        viewModelScope.launch {
+            dao.setReason(id, reason.trim().ifEmpty { null })
+            if (dao.get(id)?.isIncome == false) Budgets.check(getApplication(), reason)
+        }
         Notifier.cancel(getApplication(), id)
     }
 
     fun delete(id: Long) {
-        viewModelScope.launch { dao.remove(id) }
+        viewModelScope.launch { dao.remove(id); com.yadkharj.widget.TxWidget.refresh(getApplication()) }
         Notifier.cancel(getApplication(), id)
     }
 }
@@ -71,6 +79,7 @@ class MainActivity : ComponentActivity() {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
         Notifier.ensureChannel(this)
+        com.yadkharj.domain.RecurringStore.schedule(this)
         setContent { AppTheme { App() } }
     }
 }
@@ -86,12 +95,26 @@ fun App(vm: MainVm = viewModel()) {
     LifecycleEventEffect(Lifecycle.Event.ON_RESUME) { permTick++ }
     val smsOk = remember(permTick) { Perms.sms(ctx) }
 
+    val cards = remember(all) { all.mapNotNull { it.card }.distinct().sorted() }
+    var pickedCard by rememberSaveable { mutableStateOf<String?>(null) }
+    val card = pickedCard?.takeIf { it in cards }
+    val view = remember(all, card) { if (card == null) all else all.filter { it.card == card } }
+
     Column(Modifier.fillMaxSize().background(P.bg).statusBarsPadding()) {
+        if (tab < 2 && cards.isNotEmpty()) {
+            Row(
+                Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()).padding(horizontal = 20.dp, vertical = 8.dp),
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                Chip("همه کارت‌ها", selected = card == null) { pickedCard = null }
+                cards.forEach { c -> Chip("کارت ${Fmt.digits(c)}", selected = card == c) { pickedCard = c } }
+            }
+        }
         Box(Modifier.weight(1f)) {
             when (tab) {
-                0 -> TxScreen(all, toman, smsOk, onEdit = { editing = it }, onOpenSettings = { tab = 2 })
-                1 -> ReportScreen(all, toman)
-                else -> SettingsScreen(toman, { toman = it; Prefs.setToman(ctx, it) }, permTick) { permTick++ }
+                0 -> TxScreen(view, toman, smsOk, onEdit = { editing = it }, onOpenSettings = { tab = 2 })
+                1 -> ReportScreen(view, toman)
+                else -> SettingsScreen(toman, { toman = it; Prefs.setToman(ctx, it); com.yadkharj.widget.TxWidget.refresh(ctx) }, permTick) { permTick++ }
             }
         }
         BottomBar(tab) { tab = it }

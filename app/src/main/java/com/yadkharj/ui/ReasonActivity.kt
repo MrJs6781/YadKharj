@@ -28,6 +28,7 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import com.yadkharj.data.AppDb
 import com.yadkharj.data.Tx
+import com.yadkharj.domain.Budgets
 import com.yadkharj.domain.Notifier
 import com.yadkharj.domain.Prefs
 import com.yadkharj.domain.Suggestions
@@ -88,6 +89,7 @@ private fun PopupHost(txId: Long, onDone: () -> Unit) {
                 onSave = { reason ->
                     scope.launch {
                         AppDb.get(ctx).dao().setReason(t.id, reason.trim())
+                        if (!t.isIncome) Budgets.check(ctx.applicationContext, reason)
                         Notifier.cancel(ctx, t.id)
                         onDone()
                     }

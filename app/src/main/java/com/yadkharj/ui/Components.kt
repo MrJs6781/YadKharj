@@ -205,3 +205,20 @@ fun ReasonCard(
         }
     }
 }
+
+@Composable
+fun Field(value: String, onChange: (String) -> Unit, hint: String, modifier: Modifier = Modifier, number: Boolean = false) {
+    Box(modifier.clip(RoundedCornerShape(14.dp)).background(P.surface).padding(horizontal = 14.dp, vertical = 11.dp)) {
+        if (value.isEmpty()) Txt(hint, size = 14, color = P.muted)
+        BasicTextField(
+            value = value, onValueChange = onChange, singleLine = true,
+            textStyle = TextStyle(fontFamily = Vazir, fontSize = 14.sp, color = P.ink),
+            cursorBrush = SolidColor(P.ink),
+            keyboardOptions = KeyboardOptions(
+                imeAction = ImeAction.Search,
+                keyboardType = if (number) androidx.compose.ui.text.input.KeyboardType.Number else androidx.compose.ui.text.input.KeyboardType.Text
+            ),
+            modifier = Modifier.fillMaxWidth()
+        )
+    }
+}
