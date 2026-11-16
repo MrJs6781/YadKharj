@@ -61,6 +61,20 @@ object Notifier {
 
     fun cancel(c: Context, id: Long) = NotificationManagerCompat.from(c).cancel(id.toInt())
 
+    /** هشدار بودجه؛ شناسهٔ اعلان از برچسب ساخته می‌شود تا هر سقف یک اعلان داشته باشد. */
+    fun budget(c: Context, label: String, text: String) = alert(c, "budget", "هشدار بودجه", "بودجه", label, text)
+
+    fun alert(c: Context, channel: String, channelName: String, title: String, label: String, text: String) {
+        val nm = c.getSystemService(NotificationManager::class.java)
+        if (nm.getNotificationChannel(channel) == null) {
+            nm.createNotificationChannel(NotificationChannel(channel, channelName, NotificationManager.IMPORTANCE_DEFAULT))
+        }
+        val n = NotificationCompat.Builder(c, channel)
+            .setSmallIcon(R.drawable.ic_notif).setContentTitle(title).setContentText(text)
+            .setStyle(NotificationCompat.BigTextStyle().bigText(text)).setAutoCancel(true).build()
+        try { NotificationManagerCompat.from(c).notify(-(label.hashCode() and 0x7fffffff) - 1, n) } catch (e: SecurityException) { }
+    }
+
     /** اگر مجوز «نمایش روی سایر برنامه‌ها» داده شده باشد، پنجره مستقیم باز می‌شود؛ وگرنه نوتیف تمام‌صفحه/هدزآپ. */
     fun announce(c: Context, tx: Tx) {
         val intent = Intent(c, ReasonActivity::class.java)
@@ -68,7 +82,7 @@ object Notifier {
             .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_SINGLE_TOP)
 
         if (Perms.overlay(c)) {
-            try { c.startActivity(intent); return } catch (_: Exception) { }
+            try { c.startActivity(intent); return } catch (e: Exception) { }
         }
 
         ensureChannel(c)
@@ -87,7 +101,7 @@ object Notifier {
             .setContentIntent(pi)
             .setFullScreenIntent(pi, true)
             .build()
-        try { NotificationManagerCompat.from(c).notify(tx.id.toInt(), n) } catch (_: SecurityException) { }
+        try { NotificationManagerCompat.from(c).notify(tx.id.toInt(), n) } catch (e: SecurityException) { }
     }
 }
 
@@ -95,9 +109,11 @@ object TxProcessor {
     /** پیامک را بررسی می‌کند؛ اگر تراکنش بانکی بود ذخیره و پنجرهٔ پرسیدن دلیل را باز می‌کند. */
     suspend fun process(c: Context, sender: String, body: String, time: Long = System.currentTimeMillis()): Long? {
         val p = SmsParser.parse(body) ?: return null
-        val tx = Tx(amount = p.amountRial, isIncome = p.isIncome, timestamp = time, sender = sender, body = body)
+        val tx = Tx(amount = p.amountRial, isIncome = p.isIncome, timestamp = time, sender = sender, body = body, card = p.card, balance = p.balanceRial)
         val id = AppDb.get(c).dao().insert(tx)
         Notifier.announce(c, tx.copy(id = id))
+        com.yadkharj.widget.TxWidget.refresh(c)
+        if (!p.isIncome) Budgets.check(c, null)
         return id
     }
 }

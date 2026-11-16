@@ -53,7 +53,28 @@ object Periods {
     }
 }
 
+data class Delta(val label: String, val cur: Long, val prev: Long) {
+    /** درصد تغییر نسبت به ماه قبل؛ null اگر ماه قبل صفر بوده. */
+    val pct: Int? get() = if (prev > 0) Math.round((cur - prev) * 100.0 / prev).toInt() else null
+}
+
 object Reports {
+    /** مقایسهٔ خرج دو بازه: ردیف اول «کل»، بعد دلیل‌ها به ترتیب بیشترین تغییر. */
+    fun compare(all: List<Tx>, cur: Period, prev: Period): List<Delta> {
+        fun by(p: Period): Map<String, Long> {
+            val z = ZoneId.systemDefault()
+            val s = p.start.atStartOfDay(z).toInstant().toEpochMilli()
+            val e = p.end.atStartOfDay(z).toInstant().toEpochMilli()
+            return all.filter { !it.isIncome && it.timestamp in s until e && !it.reason.isNullOrBlank() }
+                .groupBy { it.reason!!.trim() }.mapValues { (_, v) -> v.sumOf { it.amount } }
+        }
+        val c = by(cur)
+        val v = by(prev)
+        val rows = (c.keys + v.keys).map { Delta(it, c[it] ?: 0, v[it] ?: 0) }
+            .sortedByDescending { Math.abs(it.cur - it.prev) }.take(6)
+        return if (rows.isEmpty()) rows else listOf(Delta("کل خرج", c.values.sum(), v.values.sum())) + rows
+    }
+
     fun build(all: List<Tx>, p: Period): Report {
         val zone = ZoneId.systemDefault()
         val s = p.start.atStartOfDay(zone).toInstant().toEpochMilli()

@@ -1,3 +1,4 @@
 <resources>
     <string name="app_name">یادخرج</string>
+    <string name="widget_desc">خلاصهٔ خرج امروز و این هفته</string>
 </resources>

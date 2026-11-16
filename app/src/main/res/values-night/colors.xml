@@ -1,4 +1,7 @@
 <resources>
     <color name="app_bg">#0F1113</color>
     <color name="icon_bg">#14171A</color>
+    <color name="w_surface">#181B1E</color>
+    <color name="w_ink">#EDEBE6</color>
+    <color name="w_muted">#8B9096</color>
 </resources>

@@ -2,7 +2,7 @@ package com.yadkharj.domain
 
 /** تشخیص پیامک‌های بانکی (واریز / برداشت) و استخراج مبلغ. */
 object SmsParser {
-    data class Parsed(val amountRial: Long, val isIncome: Boolean)
+    data class Parsed(val amountRial: Long, val isIncome: Boolean, val card: String? = null, val balanceRial: Long? = null)
 
     private val incomeWords = listOf("واریز", "دریافت", "افزایش موجودی", "deposit", "credit", "بستانکار")
     private val outWords = listOf(
@@ -14,6 +14,9 @@ object SmsParser {
 
     private val signRegex = Regex("""(?:^|\s)([+-])\s*\d|\d\s*([+-])(?:\s|$)""")
     private val balanceRegex = Regex("""(?i)(?:مانده|موجودی|balance|bal)[^\d\n]{0,12}[-+]?\s*\d[\d,]*(?:\.\d+)?""")
+    private val balanceCapture = Regex("""(?i)(?:مانده|موجودی|balance|bal)[^\d\n]{0,12}([-+]?\s*\d[\d,]*)""")
+    private val cardMasked = Regex("""[*•xX]{2,}\s*(\d{4})(?!\d)""")
+    private val cardNamed = Regex("""(?i)(?:کارت|حساب|card)[^\d\n]{0,6}(\d{4})(?!\d)""")
     private val dateRegex = Regex("""\d{2,4}[/\-.]\d{1,2}[/\-.]\d{1,2}""")
     private val timeRegex = Regex("""\d{1,2}:\d{2}(?::\d{2})?""")
     private val maskRegex = Regex("""\d*[*•]+\d*|[xX]{3,}\d*""")
@@ -46,7 +49,8 @@ object SmsParser {
         val isIncome = direction(text, lower) ?: return null
         val amount = amount(text) ?: return null
         val rial = if (lower.contains("تومان")) amount * 10 else amount
-        return Parsed(rial, isIncome)
+        val mul = if (lower.contains("تومان")) 10 else 1
+        return Parsed(rial, isIncome, card(text), balance(text)?.times(mul))
     }
 
     private fun firstIndex(lower: String, words: List<String>): Int =
@@ -62,6 +66,14 @@ object SmsParser {
         val sign = m.groupValues[1].ifEmpty { m.groupValues[2] }
         return sign == "+"
     }
+
+    /** چهار رقم آخر کارت/حساب، اگر در متن باشد. */
+    fun card(text: String): String? =
+        (cardMasked.find(text) ?: cardNamed.find(text))?.groupValues?.get(1)
+
+    /** مانده بعد از تراکنش (همان واحدِ متن، یعنی هنوز ضرب در ۱۰ برای تومان نشده). */
+    fun balance(text: String): Long? =
+        balanceCapture.find(text)?.groupValues?.get(1)?.replace(" ", "")?.replace(",", "")?.replace("+", "")?.toLongOrNull()
 
     private fun toLong(s: String): Long? = s.replace(",", "").toLongOrNull()
 
