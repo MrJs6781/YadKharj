@@ -54,6 +54,7 @@ import com.yadkharj.domain.Notifier
 import com.yadkharj.domain.Perms
 import com.yadkharj.domain.Prefs
 import com.yadkharj.domain.Suggestions
+import com.yadkharj.domain.Transfers
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
@@ -123,7 +124,7 @@ fun App(vm: MainVm = viewModel()) {
         Box(Modifier.weight(1f)) {
             when (tab) {
                 0 -> TxScreen(view, toman, smsOk, onEdit = { editing = it }, onOpenSettings = { tab = 2 })
-                1 -> ReportScreen(view, toman)
+                1 -> ReportScreen(remember(view) { Transfers.without(view) }, toman)
                 else -> SettingsScreen(all, toman, { toman = it; Prefs.setToman(ctx, it); com.yadkharj.widget.TxWidget.refresh(ctx) }, permTick) { permTick++ }
             }
         }

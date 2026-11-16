@@ -10,6 +10,7 @@ import android.widget.RemoteViews
 import com.yadkharj.R
 import com.yadkharj.data.AppDb
 import com.yadkharj.domain.Fmt
+import com.yadkharj.domain.Transfers
 import com.yadkharj.domain.Period
 import com.yadkharj.domain.Periods
 import com.yadkharj.domain.Prefs
@@ -41,7 +42,7 @@ class TxWidget : AppWidgetProvider() {
         }
 
         private suspend fun render(c: Context, m: AppWidgetManager, ids: IntArray) {
-            val all = AppDb.get(c).dao().all()
+            val all = Transfers.without(AppDb.get(c).dao().all())
             val today = LocalDate.now()
             val toman = Prefs.toman(c)
             val day = Reports.build(all, Period(today, today.plusDays(1), "", false)).expense
