@@ -486,6 +486,9 @@ fun SettingsScreen(all: List<Tx>, toman: Boolean, onToman: (Boolean) -> Unit, pe
         RecurringEditor(toman)
 
         Spacer(Modifier.height(28.dp))
+        AppLockRow()
+
+        Spacer(Modifier.height(28.dp))
         Txt("واحد نمایش مبلغ", size = 12, color = P.muted)
         Spacer(Modifier.height(8.dp))
         Segmented(listOf("تومان", "ریال"), if (toman) 0 else 1) { onToman(it == 0) }
