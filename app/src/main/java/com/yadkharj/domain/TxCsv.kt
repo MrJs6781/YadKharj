@@ -4,12 +4,14 @@ import com.yadkharj.data.Tx
 
 /** خروجی/ورودی CSV (UTF-8 با BOM تا اکسل فارسی را درست بخواند). همین فایل هم پشتیبان است هم برای بازیابی. */
 object TxCsv {
-    private const val HEADER = "timestamp,amount,type,sender,card,balance,reason,body"
+    /** U+FEFF؛ با کد ساخته می‌شود چون خود کاراکتر داخل فایل منبع، خطای lint «ByteOrderMark» می‌دهد. */
+    private val BOM = 0xFEFF.toChar().toString()
+    private const val HEADER ="timestamp,amount,type,sender,card,balance,reason,body"
 
     private fun q(s: String) = "\"" + s.replace("\"", "\"\"") + "\""
 
     fun write(list: List<Tx>): String = buildString {
-        append('﻿').append(HEADER).append("\r\n")
+        append(BOM).append(HEADER).append("\r\n")
         for (t in list.sortedBy { it.timestamp }) {
             append(
                 listOf(
@@ -22,7 +24,7 @@ object TxCsv {
 
     /** ردیف‌های نامعتبر نادیده گرفته می‌شوند. id همیشه ۰ است (دیتابیس خودش می‌دهد). */
     fun read(text: String): List<Tx> =
-        rows(text.removePrefix("﻿")).drop(1).mapNotNull { c ->
+        rows(text.removePrefix(BOM)).drop(1).mapNotNull { c ->
             if (c.size < 8) return@mapNotNull null
             Tx(
                 amount = c[1].toLongOrNull() ?: return@mapNotNull null,
