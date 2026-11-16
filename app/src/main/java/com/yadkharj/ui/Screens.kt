@@ -69,7 +69,6 @@ import com.yadkharj.domain.Report
 import com.yadkharj.domain.Reports
 import com.yadkharj.domain.Slice
 import com.yadkharj.domain.TxFilter
-import com.yadkharj.domain.Transfers
 import com.yadkharj.domain.TxProcessor
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
@@ -94,7 +93,7 @@ private fun buildEntries(list: List<Tx>): List<Entry> {
 }
 
 @Composable
-fun TxScreen(all: List<Tx>, toman: Boolean, smsGranted: Boolean, onEdit: (Tx) -> Unit, onOpenSettings: () -> Unit) {
+fun TxScreen(all: List<Tx>, toman: Boolean, smsGranted: Boolean, transferIds: Set<Long>, onEdit: (Tx) -> Unit, onOpenSettings: () -> Unit) {
     val ctx = LocalContext.current
     var onlyPending by rememberSaveable { mutableStateOf(false) }
     var query by rememberSaveable { mutableStateOf("") }
@@ -102,7 +101,6 @@ fun TxScreen(all: List<Tx>, toman: Boolean, smsGranted: Boolean, onEdit: (Tx) ->
     var minTxt by rememberSaveable { mutableStateOf("") }
     var maxTxt by rememberSaveable { mutableStateOf("") }
     var showFilters by rememberSaveable { mutableStateOf(false) }
-    val transferIds = remember(all) { Transfers.ids(all) }
     val pending = all.count { it.reason == null && it.id !in transferIds }
     val filter = TxFilter(query, days, TxFilter.rial(minTxt, toman), TxFilter.rial(maxTxt, toman), onlyPending)
     val entries = remember(all, filter) { buildEntries(filter.apply(all).let { l -> if (onlyPending) l.filter { it.id !in transferIds } else l }) }
@@ -446,6 +444,7 @@ fun SettingsScreen(all: List<Tx>, toman: Boolean, onToman: (Boolean) -> Unit, pe
         // اندروید ۱۳+: برای APKِ نصب‌شده از فایل، مجوز پیامک «محدود» است و دیالوگ بدون نمایش گزینه رد می‌شود.
         // گزینهٔ «Allow restricted settings» فقط در صفحهٔ اطلاعات برنامه (سه‌نقطه) پیدا می‌شود؛ مستقیم بازش می‌کنیم.
         if (res[Manifest.permission.RECEIVE_SMS] == false && !Perms.sms(ctx)) {
+            AppLock.skipRelock = true
             ctx.startActivity(
                 Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS, Uri.parse("package:${ctx.packageName}"))
                     .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
@@ -468,6 +467,7 @@ fun SettingsScreen(all: List<Tx>, toman: Boolean, onToman: (Boolean) -> Unit, pe
             if (Build.VERSION.SDK_INT >= 33) launcher.launch(arrayOf(Manifest.permission.POST_NOTIFICATIONS))
         }
         PermRow("نمایش روی سایر برنامه‌ها", "تا پنجرهٔ «دلیلش چی بود؟» همون لحظه باز بشه", Perms.overlay(ctx)) {
+            AppLock.skipRelock = true
             ctx.startActivity(
                 Intent(Settings.ACTION_MANAGE_OVERLAY_PERMISSION, Uri.parse("package:${ctx.packageName}"))
                     .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
@@ -579,8 +579,8 @@ private fun BackupRow(all: List<Tx>) {
     Txt("پشتیبان‌گیری", size = 12, color = P.muted)
     Spacer(Modifier.height(8.dp))
     Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-        Pill("خروجی CSV", filled = false, modifier = Modifier.weight(1f)) { export.launch("yadkharj.csv") }
-        Pill("بازیابی از CSV", filled = false, modifier = Modifier.weight(1f)) { restore.launch(arrayOf("*/*")) }
+        Pill("خروجی CSV", filled = false, modifier = Modifier.weight(1f)) { AppLock.skipRelock = true; export.launch("yadkharj.csv") }
+        Pill("بازیابی از CSV", filled = false, modifier = Modifier.weight(1f)) { AppLock.skipRelock = true; restore.launch(arrayOf("*/*")) }
     }
     msg?.let { Txt(it, size = 11, color = P.muted, modifier = Modifier.padding(top = 8.dp)) }
     Txt("فایل CSV همهٔ تراکنش‌ها رو داره؛ هر جا خواستی نگهش دار و بعداً بازیابی کن. بودجه و یادآورها داخلش نیست.", size = 11, color = P.muted, modifier = Modifier.padding(top = 8.dp))
@@ -651,6 +651,7 @@ private fun ImportRow() {
     val launcher = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { ok ->
         if (ok) go() else {
             msg = "دسترسی داده نشد. اگه «App was denied access» دیدی: اطلاعات برنامه ← سه‌نقطه ← Allow restricted settings."
+            AppLock.skipRelock = true
             ctx.startActivity(
                 Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS, Uri.parse("package:${ctx.packageName}")).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
             )

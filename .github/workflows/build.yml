@@ -26,6 +26,16 @@ jobs:
       - name: Build debug APK
         run: gradle assembleDebug --no-daemon --stacktrace
 
+      - name: Lint
+        run: gradle lintDebug --no-daemon --stacktrace
+        continue-on-error: true
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: lint-report
+          path: app/build/reports/lint-results-debug.html
+          if-no-files-found: ignore
+
       - uses: actions/upload-artifact@v4
         with:
           name: YadKharj-APK

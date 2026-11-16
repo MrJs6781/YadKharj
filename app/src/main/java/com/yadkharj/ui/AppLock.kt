@@ -19,10 +19,8 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.SideEffect
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
-import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -36,6 +34,14 @@ import androidx.lifecycle.compose.LifecycleEventEffect
 /** قفل برنامه با قفل صفحهٔ خود گوشی (PIN/الگو/رمز/اثرانگشت). */
 object AppLock {
     const val GRACE_MS = 60_000L
+
+    /** آخرین ON_STOP (elapsedRealtime)؛ ۰ یعنی پردازهٔ تازه (مثلاً بعد از kill شدن) و باید قفل باشد. فقط در حافظهٔ پردازه می‌ماند، پس چرخش صفحه قفل نمی‌کند ولی kill شدن می‌کند. */
+    @Volatile var lastStop = 0L
+
+    /** قبل از باز کردن یه صفحهٔ بیرونی (انتخاب فایل، تنظیمات گوشی) true شود تا برگشتنِ دیرهنگام قفل نکند و نتیجهٔ آن صفحه گم نشود. */
+    @Volatile var skipRelock = false
+
+    fun shouldLock() = lastStop == 0L || SystemClock.elapsedRealtime() - lastStop > GRACE_MS
 
     private fun sp(c: Context) = c.getSharedPreferences("applock", Context.MODE_PRIVATE)
 
@@ -60,8 +66,7 @@ object AppLock {
 @Composable
 fun AppLockGate(content: @Composable () -> Unit) {
     val ctx = LocalContext.current
-    var locked by rememberSaveable { mutableStateOf(true) }
-    var stoppedAt by remember { mutableLongStateOf(0L) }
+    var locked by remember { mutableStateOf(AppLock.shouldLock()) }
     var authing by remember { mutableStateOf(false) }
     val active = AppLock.active(ctx)
 
@@ -70,6 +75,7 @@ fun AppLockGate(content: @Composable () -> Unit) {
         if (r.resultCode == Activity.RESULT_OK) locked = false
     }
     fun unlock() {
+        if (authing) return
         val i = ctx.getSystemService(KeyguardManager::class.java)
             ?.createConfirmDeviceCredentialIntent("قفل برنامه", "برای دیدن اطلاعات، هویتت رو تأیید کن")
         if (i == null) { locked = false; return }
@@ -81,12 +87,10 @@ fun AppLockGate(content: @Composable () -> Unit) {
         AppLock.applySecure(ctx)
         if (!active && locked) locked = false
     }
-    LifecycleEventEffect(Lifecycle.Event.ON_STOP) { if (!authing) stoppedAt = SystemClock.elapsedRealtime() }
+    LifecycleEventEffect(Lifecycle.Event.ON_STOP) { if (!authing) AppLock.lastStop = SystemClock.elapsedRealtime() }
     LifecycleEventEffect(Lifecycle.Event.ON_START) {
-        if (!authing && stoppedAt > 0 && AppLock.active(ctx) &&
-            SystemClock.elapsedRealtime() - stoppedAt > AppLock.GRACE_MS
-        ) locked = true
-        stoppedAt = 0L
+        if (!authing && !AppLock.skipRelock && AppLock.active(ctx) && AppLock.lastStop > 0 && AppLock.shouldLock()) locked = true
+        AppLock.skipRelock = false
     }
     LaunchedEffect(locked) { if (locked && active) unlock() }
 

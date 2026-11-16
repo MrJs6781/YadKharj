@@ -106,6 +106,7 @@ fun App(vm: MainVm = viewModel()) {
     val cardBanks = remember(all) { Banks.byCard(all) }
     var pickedCard by rememberSaveable { mutableStateOf<String?>(null) }
     val card = pickedCard?.takeIf { it in cards }
+    val xfer = remember(all) { Transfers.ids(all) }
     val view = remember(all, card) { if (card == null) all else all.filter { it.card == card } }
 
     Column(Modifier.fillMaxSize().background(P.bg).statusBarsPadding()) {
@@ -123,8 +124,8 @@ fun App(vm: MainVm = viewModel()) {
         }
         Box(Modifier.weight(1f)) {
             when (tab) {
-                0 -> TxScreen(view, toman, smsOk, onEdit = { editing = it }, onOpenSettings = { tab = 2 })
-                1 -> ReportScreen(remember(view) { Transfers.without(view) }, toman)
+                0 -> TxScreen(view, toman, smsOk, xfer, onEdit = { editing = it }, onOpenSettings = { tab = 2 })
+                1 -> ReportScreen(remember(view, xfer) { view.filter { it.id !in xfer } }, toman)
                 else -> SettingsScreen(all, toman, { toman = it; Prefs.setToman(ctx, it); com.yadkharj.widget.TxWidget.refresh(ctx) }, permTick) { permTick++ }
             }
         }
