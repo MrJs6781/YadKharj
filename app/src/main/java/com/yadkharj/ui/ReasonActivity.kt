@@ -29,6 +29,7 @@ import androidx.compose.ui.unit.dp
 import com.yadkharj.data.AppDb
 import com.yadkharj.data.Tx
 import com.yadkharj.domain.Budgets
+import com.yadkharj.domain.Senders
 import com.yadkharj.domain.Notifier
 import com.yadkharj.domain.Prefs
 import com.yadkharj.domain.Suggestions
@@ -94,7 +95,16 @@ private fun PopupHost(txId: Long, onDone: () -> Unit) {
                         onDone()
                     }
                 },
-                onLater = { Notifier.cancel(ctx, t.id); onDone() }
+                onLater = { Notifier.cancel(ctx, t.id); onDone() },
+                onNotBank = t.sender.takeIf { it.isNotEmpty() && it != "TEST" }?.let { s ->
+                    {
+                        scope.launch {
+                            Notifier.cancel(ctx, t.id)
+                            Senders.block(ctx.applicationContext, s)
+                            onDone()
+                        }
+                    }
+                }
             )
         }
     }

@@ -53,6 +53,9 @@ interface TxDao {
     @Query("UPDATE tx SET reason = :reason WHERE id = :id")
     suspend fun setReason(id: Long, reason: String?)
 
+    @Query("DELETE FROM tx WHERE sender = :sender")
+    suspend fun removeBySender(sender: String)
+
     @Query("DELETE FROM tx WHERE id = :id")
     suspend fun remove(id: Long)
 }

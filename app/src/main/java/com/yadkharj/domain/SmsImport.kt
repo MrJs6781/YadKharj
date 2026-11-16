@@ -17,6 +17,7 @@ object SmsImport {
     suspend fun run(c: Context): Int {
         val dao = AppDb.get(c).dao()
         val known = dao.all().groupBy({ it.body }, { it.timestamp })
+        val blocked = Senders.blocked(c)
         val fresh = mutableListOf<Tx>()
         c.contentResolver.query(
             Telephony.Sms.Inbox.CONTENT_URI,
@@ -27,6 +28,7 @@ object SmsImport {
             while (cur.moveToNext() && rows++ < MAX_ROWS) {
                 val body = cur.getString(1) ?: continue
                 val ts = cur.getLong(2)
+                if (cur.getString(0).orEmpty() in blocked) continue
                 if (known[body]?.any { abs(it - ts) < SAME_MS } == true) continue
                 val p = SmsParser.parse(body) ?: continue
                 fresh += Tx(

@@ -45,7 +45,11 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.foundation.Image
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.res.painterResource
 import com.yadkharj.data.Tx
+import com.yadkharj.domain.Bank
 import com.yadkharj.domain.Fmt
 import kotlinx.coroutines.delay
 
@@ -87,17 +91,34 @@ fun Pill(text: String, modifier: Modifier = Modifier, filled: Boolean = true, en
 }
 
 @Composable
-fun Chip(text: String, selected: Boolean = false, onClick: () -> Unit) {
+fun Chip(text: String, selected: Boolean = false, leading: (@Composable () -> Unit)? = null, onClick: () -> Unit) {
     val shape = RoundedCornerShape(50)
-    Box(
+    Row(
         Modifier
             .clip(shape)
             .background(if (selected) P.accent else Color.Transparent)
             .border(1.dp, if (selected) P.accent else P.line, shape)
             .clickable(onClick = onClick)
-            .padding(horizontal = 14.dp, vertical = 7.dp)
+            .padding(horizontal = 14.dp, vertical = 7.dp),
+        verticalAlignment = Alignment.CenterVertically
     ) {
+        if (leading != null) { leading(); Spacer(Modifier.width(8.dp)) }
         Txt(text, size = 13, color = if (selected) P.onAccent else P.ink, maxLines = 1)
+    }
+}
+
+/** نشان دایره‌ای بانک: اگر drawable با نام bank_<key> در پروژه باشد همان، وگرنه حرف اول نام روی رنگ برند. */
+@Composable
+fun BankBadge(bank: Bank?, size: Int = 28) {
+    val ctx = LocalContext.current
+    val res = remember(bank) { bank?.let { ctx.resources.getIdentifier("bank_${it.key}", "drawable", ctx.packageName) } ?: 0 }
+    val m = Modifier.size(size.dp).clip(CircleShape)
+    when {
+        bank == null -> Spacer(m)
+        res != 0 -> Image(painterResource(res), bank.name, m)
+        else -> Box(m.background(Color(bank.color)), contentAlignment = Alignment.Center) {
+            Txt(bank.name.take(1), size = (size * 0.5).toInt(), color = Color.White, weight = FontWeight.Bold)
+        }
     }
 }
 
@@ -131,7 +152,8 @@ fun ReasonCard(
     laterLabel: String = "بعداً وارد می‌کنم",
     onSave: (String) -> Unit,
     onLater: () -> Unit,
-    onDelete: (() -> Unit)? = null
+    onDelete: (() -> Unit)? = null,
+    onNotBank: (() -> Unit)? = null
 ) {
     var text by remember(tx.id) { mutableStateOf(initial) }
     val focus = remember { FocusRequester() }
@@ -196,6 +218,12 @@ fun ReasonCard(
             Pill("ثبت", Modifier.weight(1f), enabled = text.isNotBlank()) { onSave(text) }
             Spacer(Modifier.width(10.dp))
             Pill(laterLabel, filled = false, onClick = onLater)
+        }
+        if (onNotBank != null) {
+            Txt(
+                "این فرستنده بانک نیست (حذف از لیست)", size = 12, color = P.muted, align = TextAlign.Center,
+                modifier = Modifier.fillMaxWidth().padding(top = 14.dp).clickable(onClick = onNotBank)
+            )
         }
         if (onDelete != null) {
             Txt(

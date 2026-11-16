@@ -46,7 +46,9 @@ import androidx.lifecycle.viewModelScope
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.yadkharj.data.AppDb
 import com.yadkharj.data.Tx
+import com.yadkharj.domain.Banks
 import com.yadkharj.domain.Budgets
+import com.yadkharj.domain.Senders
 import com.yadkharj.domain.Fmt
 import com.yadkharj.domain.Notifier
 import com.yadkharj.domain.Perms
@@ -66,6 +68,10 @@ class MainVm(app: Application) : AndroidViewModel(app) {
             if (dao.get(id)?.isIncome == false) Budgets.check(getApplication(), reason)
         }
         Notifier.cancel(getApplication(), id)
+    }
+
+    fun blockSender(sender: String) {
+        viewModelScope.launch { Senders.block(getApplication(), sender) }
     }
 
     fun delete(id: Long) {
@@ -96,6 +102,7 @@ fun App(vm: MainVm = viewModel()) {
     val smsOk = remember(permTick) { Perms.sms(ctx) }
 
     val cards = remember(all) { all.mapNotNull { it.card }.distinct().sorted() }
+    val cardBanks = remember(all) { Banks.byCard(all) }
     var pickedCard by rememberSaveable { mutableStateOf<String?>(null) }
     val card = pickedCard?.takeIf { it in cards }
     val view = remember(all, card) { if (card == null) all else all.filter { it.card == card } }
@@ -107,14 +114,17 @@ fun App(vm: MainVm = viewModel()) {
                 horizontalArrangement = Arrangement.spacedBy(8.dp)
             ) {
                 Chip("همه کارت‌ها", selected = card == null) { pickedCard = null }
-                cards.forEach { c -> Chip("کارت ${Fmt.digits(c)}", selected = card == c) { pickedCard = c } }
+                cards.forEach { c ->
+                    val b = cardBanks[c]
+                    Chip(Banks.label(b, c), selected = card == c, leading = if (b != null) ({ BankBadge(b, 20) }) else null) { pickedCard = c }
+                }
             }
         }
         Box(Modifier.weight(1f)) {
             when (tab) {
                 0 -> TxScreen(view, toman, smsOk, onEdit = { editing = it }, onOpenSettings = { tab = 2 })
                 1 -> ReportScreen(view, toman)
-                else -> SettingsScreen(toman, { toman = it; Prefs.setToman(ctx, it); com.yadkharj.widget.TxWidget.refresh(ctx) }, permTick) { permTick++ }
+                else -> SettingsScreen(all, toman, { toman = it; Prefs.setToman(ctx, it); com.yadkharj.widget.TxWidget.refresh(ctx) }, permTick) { permTick++ }
             }
         }
         BottomBar(tab) { tab = it }
@@ -130,7 +140,9 @@ fun App(vm: MainVm = viewModel()) {
                     tx = tx, suggestions = sugg, toman = toman, initial = tx.reason ?: "", laterLabel = "بستن",
                     onSave = { vm.setReason(tx.id, it); editing = null },
                     onLater = { editing = null },
-                    onDelete = { vm.delete(tx.id); editing = null }
+                    onDelete = { vm.delete(tx.id); editing = null },
+                    onNotBank = tx.sender.takeIf { it.isNotEmpty() && it != "manual" && it != "TEST" }
+                        ?.let { s -> { vm.blockSender(s); editing = null } }
                 )
             }
         }

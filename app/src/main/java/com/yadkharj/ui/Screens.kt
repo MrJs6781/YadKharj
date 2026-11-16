@@ -47,7 +47,9 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import com.yadkharj.data.Tx
+import com.yadkharj.domain.Banks
 import com.yadkharj.domain.Budgets
+import com.yadkharj.domain.Senders
 import com.yadkharj.domain.DayBar
 import com.yadkharj.domain.Delta
 import com.yadkharj.domain.Fmt
@@ -96,6 +98,7 @@ fun TxScreen(all: List<Tx>, toman: Boolean, smsGranted: Boolean, onEdit: (Tx) ->
     val pending = all.count { it.reason == null }
     val filter = TxFilter(query, days, TxFilter.rial(minTxt, toman), TxFilter.rial(maxTxt, toman), onlyPending)
     val entries = remember(all, filter) { buildEntries(filter.apply(all)) }
+    val cardBanks = remember(all) { Banks.byCard(all) }
 
     LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(horizontal = 20.dp, vertical = 12.dp)) {
         item {
@@ -132,8 +135,11 @@ fun TxScreen(all: List<Tx>, toman: Boolean, smsGranted: Boolean, onEdit: (Tx) ->
                 Column(Modifier.fillMaxWidth().padding(bottom = 12.dp).clip(RoundedCornerShape(20.dp)).background(P.surface).padding(18.dp)) {
                     Txt("آخرین مانده", size = 12, color = P.muted)
                     balances.forEach { (c, t) ->
-                        Row(Modifier.padding(top = 6.dp)) {
-                            Txt(c?.let { "کارت ${Fmt.digits(it)}" } ?: "حساب", size = 13, modifier = Modifier.weight(1f))
+                        val b = c?.let { cardBanks[it] } ?: Banks.detect(t.sender, t.body)
+                        Row(Modifier.padding(top = 8.dp), verticalAlignment = Alignment.CenterVertically) {
+                            BankBadge(b, 24)
+                            Spacer(Modifier.width(8.dp))
+                            Txt(Banks.label(b, c), size = 13, modifier = Modifier.weight(1f))
                             Txt("${Fmt.money(t.balance!!, toman)} ${Fmt.unit(toman)}", size = 13, weight = FontWeight.Medium)
                         }
                     }
@@ -178,7 +184,10 @@ private fun TxRow(tx: Tx, toman: Boolean, onClick: () -> Unit) {
         verticalAlignment = Alignment.CenterVertically
     ) {
         Box(Modifier.width(3.dp).height(34.dp).clip(RoundedCornerShape(2.dp)).background(tone))
-        Spacer(Modifier.width(14.dp))
+        Spacer(Modifier.width(12.dp))
+        val bank = remember(tx.sender, tx.body) { Banks.detect(tx.sender, tx.body) }
+        BankBadge(bank, 28)
+        Spacer(Modifier.width(12.dp))
         Column(Modifier.weight(1f)) {
             if (tx.reason != null) {
                 Txt(tx.reason, size = 15, weight = FontWeight.Medium, maxLines = 1)
@@ -413,7 +422,7 @@ private fun SliceSection(title: String, slices: List<Slice>, total: Long, tone: 
 /* ───────────── تنظیمات ───────────── */
 
 @Composable
-fun SettingsScreen(toman: Boolean, onToman: (Boolean) -> Unit, permTick: Int, onChanged: () -> Unit) {
+fun SettingsScreen(all: List<Tx>, toman: Boolean, onToman: (Boolean) -> Unit, permTick: Int, onChanged: () -> Unit) {
     val ctx = LocalContext.current
     val scope = rememberCoroutineScope()
     val launcher = rememberLauncherForActivityResult(ActivityResultContracts.RequestMultiplePermissions()) { res ->
@@ -452,6 +461,9 @@ fun SettingsScreen(toman: Boolean, onToman: (Boolean) -> Unit, permTick: Int, on
             "اگه گفت «App was denied access»: بعد از رد شدن، صفحهٔ اطلاعات برنامه باز می‌شه ← سه‌نقطهٔ بالا ← «Allow restricted settings» ← برگرد و دوباره «فعال‌سازی» رو بزن.",
             size = 11, color = P.muted, modifier = Modifier.padding(top = 8.dp)
         )
+
+        Spacer(Modifier.height(28.dp))
+        SendersEditor(all)
 
         Spacer(Modifier.height(28.dp))
         ImportRow()
@@ -511,6 +523,54 @@ private fun BudgetEditor(toman: Boolean) {
         update(budgets + (reason.trim() to rial!!)); reason = ""; amount = ""
     }
     Txt("وقتی خرج به ۸۰٪ یا ۱۰۰٪ سقف برسه، اعلان می‌گیری.", size = 11, color = P.muted, modifier = Modifier.padding(top = 8.dp))
+}
+
+@Composable
+private fun SendersEditor(all: List<Tx>) {
+    val ctx = LocalContext.current
+    val scope = rememberCoroutineScope()
+    var blocked by remember { mutableStateOf(Senders.blocked(ctx)) }
+    var confirm by remember { mutableStateOf<String?>(null) }
+    val rows = remember(all) {
+        all.groupBy { it.sender }.filterKeys { it.isNotEmpty() && it != "manual" && it != "TEST" }
+            .map { (s, l) -> Triple(s, l.size, Banks.detect(s, l.first().body)) }
+            .sortedByDescending { it.second }
+    }
+
+    Txt("فرستنده‌های پیامک", size = 12, color = P.muted)
+    Spacer(Modifier.height(8.dp))
+    if (rows.isEmpty()) Txt("هنوز پیامکی ثبت نشده.", size = 12, color = P.muted)
+    rows.forEach { (s, n, bank) ->
+        Row(Modifier.fillMaxWidth().padding(bottom = 8.dp).clip(RoundedCornerShape(18.dp)).background(P.surface).padding(14.dp), verticalAlignment = Alignment.CenterVertically) {
+            BankBadge(bank, 28)
+            Spacer(Modifier.width(10.dp))
+            Column(Modifier.weight(1f)) {
+                Txt(s, size = 14, maxLines = 1)
+                Txt("${Fmt.digits(n.toString())} تراکنش${bank?.let { " · ${it.name}" }.orEmpty()}", size = 11, color = P.muted)
+            }
+            Txt(
+                if (confirm == s) "تأیید حذف" else "بانک نیست", size = 12, color = P.warn,
+                modifier = Modifier.clickable {
+                    if (confirm != s) confirm = s
+                    else {
+                        confirm = null
+                        scope.launch(Dispatchers.IO) { Senders.block(ctx.applicationContext, s); blocked = Senders.blocked(ctx) }
+                    }
+                }.padding(6.dp)
+            )
+        }
+    }
+    if (blocked.isNotEmpty()) {
+        Spacer(Modifier.height(8.dp))
+        Txt("نادیده‌گرفته‌شده‌ها", size = 12, color = P.muted)
+        blocked.forEach { s ->
+            Row(Modifier.fillMaxWidth().padding(top = 8.dp), verticalAlignment = Alignment.CenterVertically) {
+                Txt(s, size = 13, modifier = Modifier.weight(1f), maxLines = 1)
+                Txt("بازگرداندن", size = 12, color = P.muted, modifier = Modifier.clickable { Senders.unblock(ctx, s); blocked = Senders.blocked(ctx) }.padding(6.dp))
+            }
+        }
+    }
+    Txt("با «بانک نیست»، تراکنش‌های قبلی این فرستنده پاک می‌شن و پیامک‌های بعدی‌اش ثبت نمی‌شن.", size = 11, color = P.muted, modifier = Modifier.padding(top = 8.dp))
 }
 
 @Composable

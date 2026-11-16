@@ -108,6 +108,7 @@ object Notifier {
 object TxProcessor {
     /** پیامک را بررسی می‌کند؛ اگر تراکنش بانکی بود ذخیره و پنجرهٔ پرسیدن دلیل را باز می‌کند. */
     suspend fun process(c: Context, sender: String, body: String, time: Long = System.currentTimeMillis()): Long? {
+        if (Senders.isBlocked(c, sender)) return null
         val p = SmsParser.parse(body) ?: return null
         val tx = Tx(amount = p.amountRial, isIncome = p.isIncome, timestamp = time, sender = sender, body = body, card = p.card, balance = p.balanceRial)
         val id = AppDb.get(c).dao().insert(tx)

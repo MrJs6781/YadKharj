@@ -9,7 +9,7 @@ object SmsParser {
         "برداشت", "خرید", "پرداخت", "انتقال", "کارت به کارت", "حواله", "قبض",
         "withdraw", "debit", "بدهکار", "کسر"
     )
-    private val skipWords = listOf("رمز", "پویا", "کد تایید", "کد تأیید", "کد فعال", "کد یکبار", "otp", "cvv2", "تخفیف", "قرعه")
+    private val skipWords = listOf("رمز", "پویا", "کد تایید", "کد تأیید", "کد فعال", "کد یکبار", "otp", "cvv2", "تخفیف", "قرعه", "جریمه", "خلافی", "راهور")
     private val currencyWords = listOf("ریال", "تومان", "مانده", "موجودی", "irr", "rial")
 
     private val signRegex = Regex("""(?:^|\s)([+-])\s*\d|\d\s*([+-])(?:\s|$)""")
