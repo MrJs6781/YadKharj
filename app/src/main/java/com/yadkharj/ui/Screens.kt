@@ -57,6 +57,8 @@ import com.yadkharj.domain.DayBar
 import com.yadkharj.domain.Delta
 import com.yadkharj.domain.Fmt
 import com.yadkharj.domain.Periods
+import com.yadkharj.domain.year
+import com.yadkharj.domain.monthlyBars
 import com.yadkharj.domain.Perms
 import android.content.pm.PackageManager
 import androidx.core.content.ContextCompat
@@ -220,8 +222,12 @@ fun ReportScreen(all: List<Tx>, toman: Boolean) {
     var mode by rememberSaveable { mutableIntStateOf(0) }
     var offset by rememberSaveable { mutableIntStateOf(0) }
     val today = remember(all) { LocalDate.now() }
-    val period = remember(mode, offset, today) { if (mode == 0) Periods.week(offset, today) else Periods.month(offset, today) }
-    val report = remember(all, period) { Reports.build(all, period) }
+    val period = remember(mode, offset, today) {
+        when (mode) { 0 -> Periods.week(offset, today); 2 -> Periods.year(offset, today); else -> Periods.month(offset, today) }
+    }
+    val report = remember(all, period) {
+        Reports.build(all, period).let { if (mode == 2) it.copy(bars = Reports.monthlyBars(all, period)) else it }
+    }
     val net = report.income - report.expense
     val deltas = remember(all, offset, mode) {
         if (mode == 1) Reports.compare(all, period, Periods.month(offset - 1, today)) else emptyList()
@@ -235,7 +241,7 @@ fun ReportScreen(all: List<Tx>, toman: Boolean) {
         Spacer(Modifier.height(16.dp))
         Txt("گزارش", size = 28, weight = FontWeight.Bold)
         Spacer(Modifier.height(14.dp))
-        Segmented(listOf("هفتگی", "ماهانه"), mode) { mode = it; offset = 0 }
+        Segmented(listOf("هفتگی", "ماهانه", "سالانه"), mode) { mode = it; offset = 0 }
         Spacer(Modifier.height(16.dp))
 
         Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
@@ -286,7 +292,7 @@ fun ReportScreen(all: List<Tx>, toman: Boolean) {
         Column(Modifier.fillMaxWidth().clip(RoundedCornerShape(24.dp)).background(P.surface).padding(18.dp)) {
             Bars(report.bars)
             Spacer(Modifier.height(10.dp))
-            LabelsRow(report.bars, sparse = !report.period.isWeek)
+            LabelsRow(report.bars, sparse = !report.period.isWeek && mode != 2)
             Spacer(Modifier.height(10.dp))
             Row(horizontalArrangement = Arrangement.spacedBy(14.dp)) {
                 Legend("درآمد", P.income)
@@ -294,6 +300,7 @@ fun ReportScreen(all: List<Tx>, toman: Boolean) {
             }
         }
 
+        if (mode == 2) YearlyTrend(report.bars, toman)
         SliceSection("خرج‌ها بر اساس دلیل", report.expenseSlices, report.expense, P.expense, toman)
         SliceSection("درآمدها بر اساس دلیل", report.incomeSlices, report.income, P.income, toman)
 
