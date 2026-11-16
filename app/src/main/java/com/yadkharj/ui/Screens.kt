@@ -47,6 +47,9 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import com.yadkharj.data.Tx
+import com.yadkharj.data.AppDb
+import com.yadkharj.domain.TxCsv
+import com.yadkharj.widget.TxWidget
 import com.yadkharj.domain.Banks
 import com.yadkharj.domain.Budgets
 import com.yadkharj.domain.Senders
@@ -89,6 +92,7 @@ private fun buildEntries(list: List<Tx>): List<Entry> {
 
 @Composable
 fun TxScreen(all: List<Tx>, toman: Boolean, smsGranted: Boolean, onEdit: (Tx) -> Unit, onOpenSettings: () -> Unit) {
+    val ctx = LocalContext.current
     var onlyPending by rememberSaveable { mutableStateOf(false) }
     var query by rememberSaveable { mutableStateOf("") }
     var days by rememberSaveable { mutableIntStateOf(0) }
@@ -111,6 +115,7 @@ fun TxScreen(all: List<Tx>, toman: Boolean, smsGranted: Boolean, onEdit: (Tx) ->
                     val p = if (pending > 0) " · ${Fmt.digits(pending.toString())}" else ""
                     Chip("بدون دلیل$p", selected = onlyPending) { onlyPending = true }
                     Chip(if (filter.active) "فیلتر ●" else "فیلتر", selected = showFilters) { showFilters = !showFilters }
+                    Chip("+ ثبت دستی") { ctx.startActivity(Intent(ctx, QuickAddActivity::class.java)) }
                 }
                 Spacer(Modifier.height(10.dp))
                 Field(query, { query = it }, "جستجو در دلیل‌ها…", Modifier.fillMaxWidth())
@@ -463,6 +468,9 @@ fun SettingsScreen(all: List<Tx>, toman: Boolean, onToman: (Boolean) -> Unit, pe
         )
 
         Spacer(Modifier.height(28.dp))
+        BackupRow(all)
+
+        Spacer(Modifier.height(28.dp))
         SendersEditor(all)
 
         Spacer(Modifier.height(28.dp))
@@ -523,6 +531,42 @@ private fun BudgetEditor(toman: Boolean) {
         update(budgets + (reason.trim() to rial!!)); reason = ""; amount = ""
     }
     Txt("وقتی خرج به ۸۰٪ یا ۱۰۰٪ سقف برسه، اعلان می‌گیری.", size = 11, color = P.muted, modifier = Modifier.padding(top = 8.dp))
+}
+
+@Composable
+private fun BackupRow(all: List<Tx>) {
+    val ctx = LocalContext.current
+    val scope = rememberCoroutineScope()
+    var msg by remember { mutableStateOf<String?>(null) }
+    val export = rememberLauncherForActivityResult(ActivityResultContracts.CreateDocument("text/csv")) { uri ->
+        if (uri != null) scope.launch(Dispatchers.IO) {
+            msg = runCatching {
+                ctx.contentResolver.openOutputStream(uri)!!.use { it.write(TxCsv.write(all).toByteArray(Charsets.UTF_8)) }
+                "${Fmt.digits(all.size.toString())} تراکنش ذخیره شد."
+            }.getOrElse { "ذخیره نشد." }
+        }
+    }
+    val restore = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
+        if (uri != null) scope.launch(Dispatchers.IO) {
+            msg = runCatching {
+                val list = TxCsv.read(ctx.contentResolver.openInputStream(uri)!!.use { it.readBytes().toString(Charsets.UTF_8) })
+                val dao = AppDb.get(ctx).dao()
+                val have = dao.all().map { Triple(it.timestamp, it.amount, it.isIncome) }.toHashSet()
+                val fresh = list.filter { Triple(it.timestamp, it.amount, it.isIncome) !in have }
+                dao.insertAll(fresh)
+                TxWidget.refresh(ctx)
+                "${Fmt.digits(fresh.size.toString())} تراکنش جدید بازیابی شد."
+            }.getOrElse { "فایل خوانده نشد." }
+        }
+    }
+    Txt("پشتیبان‌گیری", size = 12, color = P.muted)
+    Spacer(Modifier.height(8.dp))
+    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+        Pill("خروجی CSV", filled = false, modifier = Modifier.weight(1f)) { export.launch("yadkharj.csv") }
+        Pill("بازیابی از CSV", filled = false, modifier = Modifier.weight(1f)) { restore.launch(arrayOf("*/*")) }
+    }
+    msg?.let { Txt(it, size = 11, color = P.muted, modifier = Modifier.padding(top = 8.dp)) }
+    Txt("فایل CSV همهٔ تراکنش‌ها رو داره؛ هر جا خواستی نگهش دار و بعداً بازیابی کن. بودجه و یادآورها داخلش نیست.", size = 11, color = P.muted, modifier = Modifier.padding(top = 8.dp))
 }
 
 @Composable
