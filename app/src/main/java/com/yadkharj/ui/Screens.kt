@@ -67,6 +67,7 @@ import com.yadkharj.domain.Report
 import com.yadkharj.domain.Reports
 import com.yadkharj.domain.Slice
 import com.yadkharj.domain.TxFilter
+import com.yadkharj.domain.Transfers
 import com.yadkharj.domain.TxProcessor
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
@@ -99,9 +100,10 @@ fun TxScreen(all: List<Tx>, toman: Boolean, smsGranted: Boolean, onEdit: (Tx) ->
     var minTxt by rememberSaveable { mutableStateOf("") }
     var maxTxt by rememberSaveable { mutableStateOf("") }
     var showFilters by rememberSaveable { mutableStateOf(false) }
-    val pending = all.count { it.reason == null }
+    val transferIds = remember(all) { Transfers.ids(all) }
+    val pending = all.count { it.reason == null && it.id !in transferIds }
     val filter = TxFilter(query, days, TxFilter.rial(minTxt, toman), TxFilter.rial(maxTxt, toman), onlyPending)
-    val entries = remember(all, filter) { buildEntries(filter.apply(all)) }
+    val entries = remember(all, filter) { buildEntries(filter.apply(all).let { l -> if (onlyPending) l.filter { it.id !in transferIds } else l }) }
     val cardBanks = remember(all) { Banks.byCard(all) }
 
     LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(horizontal = 20.dp, vertical = 12.dp)) {
@@ -174,7 +176,7 @@ fun TxScreen(all: List<Tx>, toman: Boolean, smsGranted: Boolean, onEdit: (Tx) ->
         items(entries) { e ->
             when (e) {
                 is Entry.Head -> Txt(e.label, size = 12, color = P.muted, modifier = Modifier.padding(top = 18.dp, bottom = 4.dp))
-                is Entry.Item -> TxRow(e.tx, toman) { onEdit(e.tx) }
+                is Entry.Item -> TxRow(e.tx, toman, e.tx.id in transferIds) { onEdit(e.tx) }
             }
         }
         item { Spacer(Modifier.height(24.dp)) }
@@ -182,7 +184,7 @@ fun TxScreen(all: List<Tx>, toman: Boolean, smsGranted: Boolean, onEdit: (Tx) ->
 }
 
 @Composable
-private fun TxRow(tx: Tx, toman: Boolean, onClick: () -> Unit) {
+private fun TxRow(tx: Tx, toman: Boolean, isTransfer: Boolean = false, onClick: () -> Unit) {
     val tone = if (tx.isIncome) P.income else P.expense
     Row(
         Modifier.fillMaxWidth().clip(RoundedCornerShape(16.dp)).clickable(onClick = onClick).padding(vertical = 12.dp, horizontal = 4.dp),
@@ -200,7 +202,8 @@ private fun TxRow(tx: Tx, toman: Boolean, onClick: () -> Unit) {
                 Txt("بدون دلیل — لمس کن", size = 14, color = P.warn, weight = FontWeight.Medium, maxLines = 1)
             }
             val cardTag = tx.card?.let { " · کارت ${Fmt.digits(it)}" }.orEmpty()
-            Txt("${Fmt.time(tx.timestamp)} · ${if (tx.isIncome) "واریز" else "برداشت"}$cardTag", size = 12, color = P.muted)
+            val xfer = if (isTransfer) " · انتقال بین کارت‌ها" else ""
+            Txt("${Fmt.time(tx.timestamp)} · ${if (tx.isIncome) "واریز" else "برداشت"}$cardTag$xfer", size = 12, color = P.muted)
         }
         Spacer(Modifier.width(12.dp))
         Row(verticalAlignment = Alignment.CenterVertically) {

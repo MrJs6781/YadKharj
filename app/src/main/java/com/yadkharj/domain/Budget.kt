@@ -30,7 +30,7 @@ object Budgets {
         val zone = ZoneId.systemDefault()
         val s = p.start.atStartOfDay(zone).toInstant().toEpochMilli()
         val e = p.end.atStartOfDay(zone).toInstant().toEpochMilli()
-        val out = all.filter { !it.isIncome && it.timestamp in s until e }
+        val out = Transfers.without(all).filter { !it.isIncome && it.timestamp in s until e }
         return budgets.map { (k, limit) ->
             val spent = if (k == TOTAL) out.sumOf { it.amount } else out.filter { it.reason?.trim() == k }.sumOf { it.amount }
             Status(if (k == TOTAL) "کل ماه" else k, spent, limit)
