@@ -495,7 +495,7 @@ fun SettingsScreen(all: List<Tx>, toman: Boolean, onToman: (Boolean) -> Unit, pe
             scope.launch(Dispatchers.IO) {
                 TxProcessor.process(
                     ctx.applicationContext, "TEST",
-                    "بانک آزمایشی\nبرداشت 1,250,000 ریال\nمانده 8,400,000 ریال"
+                    "بانک آزمایشی\nبرداشت 1,250,000 ریال\nمانده 8,400,000 ریال", dedupe = false
                 )
             }
         }

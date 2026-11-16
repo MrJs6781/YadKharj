@@ -11,12 +11,15 @@ import kotlin.math.abs
 object SmsImport {
     /** ponytail: فقط ۵۰۰۰ پیامک آخر خوانده می‌شود؛ برای صندوق بزرگ‌تر صفحه‌بندی لازم است. */
     private const val MAX_ROWS = 5000
-    private const val SAME_MS = 5 * 60_000L
+    const val SAME_MS = 5 * 60_000L
+
+    /** آیا زمان [ts] کمتر از ۵ دقیقه با یکی از زمان‌های [known] فاصله دارد؟ */
+    fun isDuplicate(known: List<Long>?, ts: Long): Boolean = known?.any { abs(it - ts) < SAME_MS } == true
 
     /** تعداد تراکنش‌های جدید را برمی‌گرداند. پیامکی که قبلاً ثبت شده (همان متن، فاصلهٔ کمتر از ۵ دقیقه) رد می‌شود. */
     suspend fun run(c: Context): Int {
         val dao = AppDb.get(c).dao()
-        val known = dao.all().groupBy({ it.body }, { it.timestamp })
+        val known = dao.all().groupBy({ it.body }, { it.timestamp }).mapValues { it.value.toMutableList() }.toMutableMap()
         val blocked = Senders.blocked(c)
         val fresh = mutableListOf<Tx>()
         c.contentResolver.query(
@@ -29,8 +32,9 @@ object SmsImport {
                 val body = cur.getString(1) ?: continue
                 val ts = cur.getLong(2)
                 if (cur.getString(0).orEmpty() in blocked) continue
-                if (known[body]?.any { abs(it - ts) < SAME_MS } == true) continue
+                if (isDuplicate(known[body], ts)) continue
                 val p = SmsParser.parse(body) ?: continue
+                known.getOrPut(body) { mutableListOf() }.add(ts)
                 fresh += Tx(
                     amount = p.amountRial, isIncome = p.isIncome, timestamp = ts, sender = cur.getString(0).orEmpty(),
                     body = body, card = p.card, balance = p.balanceRial

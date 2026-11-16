@@ -44,6 +44,9 @@ interface TxDao {
     @Query("SELECT reason FROM tx WHERE reason IS NOT NULL AND isIncome = :income ORDER BY timestamp DESC LIMIT 200")
     suspend fun recentReasons(income: Boolean): List<String>
 
+    @Query("SELECT COUNT(*) FROM tx WHERE body = :body AND sender = :sender AND timestamp BETWEEN :from AND :to")
+    suspend fun countSame(body: String, sender: String, from: Long, to: Long): Int
+
     @Insert
     suspend fun insert(tx: Tx): Long
 

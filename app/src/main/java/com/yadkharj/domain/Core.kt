@@ -13,6 +13,7 @@ import androidx.core.app.NotificationCompat
 import androidx.core.app.NotificationManagerCompat
 import androidx.core.content.ContextCompat
 import com.yadkharj.R
+import kotlinx.coroutines.sync.withLock
 import com.yadkharj.data.AppDb
 import com.yadkharj.data.Tx
 import com.yadkharj.ui.ReasonActivity
@@ -107,11 +108,18 @@ object Notifier {
 
 object TxProcessor {
     /** پیامک را بررسی می‌کند؛ اگر تراکنش بانکی بود ذخیره و پنجرهٔ پرسیدن دلیل را باز می‌کند. */
-    suspend fun process(c: Context, sender: String, body: String, time: Long = System.currentTimeMillis()): Long? {
+    // ponytail: قفل سراسری برای بررسی+درج؛ فقط چند ms نگه داشته می‌شود.
+    private val lock = kotlinx.coroutines.sync.Mutex()
+
+    suspend fun process(c: Context, sender: String, body: String, time: Long = System.currentTimeMillis(), dedupe: Boolean = true): Long? {
         if (Senders.isBlocked(c, sender)) return null
         val p = SmsParser.parse(body) ?: return null
         val tx = Tx(amount = p.amountRial, isIncome = p.isIncome, timestamp = time, sender = sender, body = body, card = p.card, balance = p.balanceRial)
-        val id = AppDb.get(c).dao().insert(tx)
+        val dao = AppDb.get(c).dao()
+        val id = lock.withLock {
+            if (dedupe && dao.countSame(body, sender, time - SmsImport.SAME_MS, time + SmsImport.SAME_MS) > 0) return null
+            dao.insert(tx)
+        }
         Notifier.announce(c, tx.copy(id = id))
         com.yadkharj.widget.TxWidget.refresh(c)
         if (!p.isIncome) Budgets.check(c, null)
