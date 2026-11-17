@@ -40,7 +40,10 @@ jobs:
         run: gradle assembleDebug --no-daemon --stacktrace
 
       - name: Show APK signing certificate
-        run: keytool -printcert -jarfile app/build/outputs/apk/debug/app-debug.apk | grep -E "Owner|SHA256"
+        run: |
+          AS=$(ls "$ANDROID_HOME"/build-tools/*/apksigner | sort | tail -1)
+          "$AS" verify --print-certs app/build/outputs/apk/debug/app-debug.apk | grep -E "certificate (DN|SHA-256)"
+        continue-on-error: true
 
       - name: Lint
         run: gradle lintDebug --no-daemon --stacktrace
