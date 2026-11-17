@@ -691,8 +691,7 @@ private fun SmsLogSection() {
                 Txt(Fmt.time(e.time), size = 11, color = P.muted)
             }
             Txt(e.status, size = 13, weight = FontWeight.Medium, color = if (ok) P.income else P.warn)
-            Txt(e.body.replace('
-', ' ').take(140), size = 11, color = P.muted, maxLines = 2)
+            Txt(e.body.lines().joinToString(" ").take(140), size = 11, color = P.muted, maxLines = 2)
         }
     }
     Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
