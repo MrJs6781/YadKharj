@@ -12,8 +12,26 @@ android {
         applicationId = "com.yadkharj"
         minSdk = 26
         targetSdk = 34
-        versionCode = 1
-        versionName = "1.0"
+        // شمارهٔ اجرای CI هر بار بزرگ‌تر می‌شود؛ بدون این، نصب نسخهٔ جدید روی قبلی خطا می‌دهد.
+        val runNo = System.getenv("GITHUB_RUN_NUMBER")?.toIntOrNull() ?: 1
+        versionCode = runNo
+        versionName = "1.0.$runNo"
+    }
+
+    // امضای ثابت: اگه CI کلید ثابت (از Secret) را بدهد، همهٔ نسخه‌ها با یک کلید امضا می‌شوند و روی هم نصب می‌شوند.
+    // بدون این، هر اجرای CI یک کلید debug تازه می‌سازد و اندروید نصب روی نسخهٔ قبلی را رد می‌کند.
+    val ksPath = System.getenv("KEYSTORE_PATH")
+    if (ksPath != null && file(ksPath).exists()) {
+        signingConfigs {
+            create("stable") {
+                storeFile = file(ksPath)
+                storeType = "pkcs12"
+                storePassword = System.getenv("KEYSTORE_PASSWORD")
+                keyAlias = System.getenv("KEY_ALIAS")
+                keyPassword = System.getenv("KEYSTORE_PASSWORD")
+            }
+        }
+        buildTypes { getByName("debug") { signingConfig = signingConfigs.getByName("stable") } }
     }
     buildTypes { release { isMinifyEnabled = false } }
     compileOptions {

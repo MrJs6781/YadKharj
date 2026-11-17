@@ -3,3 +3,10 @@ build/
 local.properties
 .idea/
 *.iml
+
+# کلید امضا؛ هرگز commit نشود
+*.p12
+*.jks
+*.keystore
+signing-secrets.txt
+.ks.b64

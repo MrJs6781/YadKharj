@@ -90,6 +90,8 @@ class MainActivity : ComponentActivity() {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
         Notifier.ensureChannel(this)
+        val app = applicationContext
+        kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.Dispatchers.IO).launch { runCatching { com.yadkharj.domain.Dedupe.cleanOnce(app) } }
         com.yadkharj.domain.RecurringStore.schedule(this)
         setContent { AppTheme { AppLockGate { AppRoot() } } }
     }

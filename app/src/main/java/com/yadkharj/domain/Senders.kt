@@ -20,6 +20,11 @@ object Senders {
         TxWidget.refresh(c)
     }
 
+    /** برای بازیابی پشتیبان: فقط به فهرست اضافه می‌کند (تراکنشی پاک نمی‌شود). */
+    fun addAll(c: Context, senders: Set<String>) {
+        if (senders.isNotEmpty()) sp(c).edit().putStringSet("blocked", blocked(c) + senders).apply()
+    }
+
     fun unblock(c: Context, sender: String) =
         sp(c).edit().putStringSet("blocked", blocked(c) - sender).apply()
 }

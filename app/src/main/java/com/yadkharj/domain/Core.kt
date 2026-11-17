@@ -141,7 +141,7 @@ object TxProcessor {
         val tx = Tx(amount = p.amountRial, isIncome = p.isIncome, timestamp = time, sender = sender, body = body, card = p.card, balance = p.balanceRial)
         val dao = AppDb.get(c).dao()
         val id = lock.withLock {
-            if (dedupe && dao.countSame(body, sender, time - SmsImport.SAME_MS, time + SmsImport.SAME_MS) > 0) {
+            if (dedupe && dao.bodiesBetween(time - SmsImport.SAME_MS, time + SmsImport.SAME_MS).any { SmsImport.key(it) == SmsImport.key(body) }) {
                 SmsLog.add(c, sender, body, "تکراری (قبلاً ثبت شده)")
                 return null
             }

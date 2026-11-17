@@ -14,3 +14,14 @@ class TxCsvTest {
         assertEquals(l.map { it.copy(id = 0) }, back)
     }
 }
+
+class TxCsvExtrasTest {
+    @Test fun extrasRoundTripAndDontLeakIntoTransactions() {
+        val tx = listOf(Tx(1, 5, false, 1L, "s", "b"))
+        val text = TxCsv.write(tx, TxCsv.Extras(setOf("9999", "Fine,Car"), mapOf("3000" to "mellat")))
+        assertEquals(1, TxCsv.read(text).size)
+        val e = TxCsv.readExtras(text)
+        assertEquals(setOf("9999", "Fine,Car"), e.blocked)
+        assertEquals(mapOf("3000" to "mellat"), e.banks)
+    }
+}

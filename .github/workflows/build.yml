@@ -20,11 +20,27 @@ jobs:
         with:
           gradle-version: '8.7'
 
+      - name: Restore signing key
+        env:
+          KEYSTORE_B64: ${{ secrets.KEYSTORE_B64 }}
+        run: |
+          if [ -n "$KEYSTORE_B64" ]; then
+            echo "$KEYSTORE_B64" | base64 -d > "$RUNNER_TEMP/yadkharj.p12"
+            echo "KEYSTORE_PATH=$RUNNER_TEMP/yadkharj.p12" >> "$GITHUB_ENV"
+            echo "KEYSTORE_PASSWORD=${{ secrets.KEYSTORE_PASSWORD }}" >> "$GITHUB_ENV"
+            echo "KEY_ALIAS=yadkharj" >> "$GITHUB_ENV"
+          else
+            echo "No KEYSTORE_B64 secret: using the random debug key (updates over an old install will fail)."
+          fi
+
       - name: Unit tests
         run: gradle testDebugUnitTest --no-daemon --stacktrace
 
       - name: Build debug APK
         run: gradle assembleDebug --no-daemon --stacktrace
+
+      - name: Show APK signing certificate
+        run: keytool -printcert -jarfile app/build/outputs/apk/debug/app-debug.apk | grep -E "Owner|SHA256"
 
       - name: Lint
         run: gradle lintDebug --no-daemon --stacktrace

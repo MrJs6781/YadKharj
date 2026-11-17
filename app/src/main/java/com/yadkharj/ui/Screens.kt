@@ -579,7 +579,7 @@ private fun BackupRow(all: List<Tx>) {
     val export = rememberLauncherForActivityResult(ActivityResultContracts.CreateDocument("text/csv")) { uri ->
         if (uri != null) scope.launch(Dispatchers.IO) {
             msg = runCatching {
-                ctx.contentResolver.openOutputStream(uri)!!.use { it.write(TxCsv.write(all).toByteArray(Charsets.UTF_8)) }
+                ctx.contentResolver.openOutputStream(uri)!!.use { it.write(TxCsv.write(all, TxCsv.Extras(Senders.blocked(ctx), Banks.loadOverrides(ctx))).toByteArray(Charsets.UTF_8)) }
                 "${Fmt.digits(all.size.toString())} تراکنش ذخیره شد."
             }.getOrElse { "ذخیره نشد." }
         }
@@ -587,7 +587,11 @@ private fun BackupRow(all: List<Tx>) {
     val restore = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
         if (uri != null) scope.launch(Dispatchers.IO) {
             msg = runCatching {
-                val list = TxCsv.read(ctx.contentResolver.openInputStream(uri)!!.use { it.readBytes().toString(Charsets.UTF_8) })
+                val text = ctx.contentResolver.openInputStream(uri)!!.use { it.readBytes().toString(Charsets.UTF_8) }
+                val list = TxCsv.read(text)
+                val extras = TxCsv.readExtras(text)
+                Senders.addAll(ctx, extras.blocked)
+                extras.banks.forEach { (s, k) -> Banks.setOverride(ctx, s, k) }
                 val dao = AppDb.get(ctx).dao()
                 val have = dao.all().map { Triple(it.timestamp, it.amount, it.isIncome) }.toHashSet()
                 val fresh = list.filter { Triple(it.timestamp, it.amount, it.isIncome) !in have }
@@ -604,7 +608,7 @@ private fun BackupRow(all: List<Tx>) {
         Pill("بازیابی از CSV", filled = false, modifier = Modifier.weight(1f)) { AppLock.skipRelock = true; restore.launch(arrayOf("*/*")) }
     }
     msg?.let { Txt(it, size = 11, color = P.muted, modifier = Modifier.padding(top = 8.dp)) }
-    Txt("فایل CSV همهٔ تراکنش‌ها رو داره؛ هر جا خواستی نگهش دار و بعداً بازیابی کن. بودجه و یادآورها داخلش نیست.", size = 11, color = P.muted, modifier = Modifier.padding(top = 8.dp))
+    Txt("فایل CSV همهٔ تراکنش‌ها، فرستنده‌های «بانک نیست» و بانکِ هر فرستنده رو داره؛ قبل از پاک کردن برنامه یه نسخه ازش بگیر. بودجه و یادآورها داخلش نیست.", size = 11, color = P.muted, modifier = Modifier.padding(top = 8.dp))
 }
 
 @Composable
