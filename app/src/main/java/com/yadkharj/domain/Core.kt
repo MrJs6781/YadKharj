@@ -11,6 +11,7 @@ import android.os.Build
 import android.provider.Settings
 import androidx.core.app.NotificationCompat
 import androidx.core.app.NotificationManagerCompat
+import androidx.core.app.RemoteInput
 import androidx.core.content.ContextCompat
 import com.yadkharj.R
 import kotlinx.coroutines.sync.withLock
@@ -32,6 +33,13 @@ object Perms {
         ContextCompat.checkSelfPermission(c, Manifest.permission.POST_NOTIFICATIONS) == PackageManager.PERMISSION_GRANTED
 
     fun overlay(c: Context) = Settings.canDrawOverlays(c)
+
+    /** اندروید ۱۴+: نمایش اعلان روی صفحهٔ قفل/خاموش مجوز جدا دارد. */
+    fun fullScreen(c: Context) = Build.VERSION.SDK_INT < 34 ||
+        c.getSystemService(NotificationManager::class.java).canUseFullScreenIntent()
+
+    fun readSms(c: Context) =
+        ContextCompat.checkSelfPermission(c, Manifest.permission.READ_SMS) == PackageManager.PERMISSION_GRANTED
 }
 
 object Suggestions {
@@ -76,33 +84,48 @@ object Notifier {
         try { NotificationManagerCompat.from(c).notify(-(label.hashCode() and 0x7fffffff) - 1, n) } catch (e: SecurityException) { }
     }
 
-    /** اگر مجوز «نمایش روی سایر برنامه‌ها» داده شده باشد، پنجره مستقیم باز می‌شود؛ وگرنه نوتیف تمام‌صفحه/هدزآپ. */
+    const val KEY_REASON = "reason"
+
+    /**
+     * همیشه اعلانِ هدزآپ می‌دهد (با فیلد «ثبت دلیل» داخل خودِ اعلان)، چون startActivity از پس‌زمینه روی
+     * اندروید ۱۰+ و پوسته‌هایی مثل MIUI بی‌صدا شکست می‌خورد. اگر «نمایش روی سایر برنامه‌ها» هم داده شده باشد،
+     * پنجرهٔ دلیل را هم مستقیم باز می‌کند.
+     */
     fun announce(c: Context, tx: Tx) {
         val intent = Intent(c, ReasonActivity::class.java)
             .putExtra(EXTRA_ID, tx.id)
             .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_SINGLE_TOP)
 
-        if (Perms.overlay(c)) {
-            try { c.startActivity(intent); return } catch (e: Exception) { }
-        }
-
         ensureChannel(c)
         val pi = PendingIntent.getActivity(
             c, tx.id.toInt(), intent, PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
         )
+        val replyFlags = PendingIntent.FLAG_UPDATE_CURRENT or (if (Build.VERSION.SDK_INT >= 31) PendingIntent.FLAG_MUTABLE else 0)
+        val replyPi = PendingIntent.getBroadcast(
+            c, tx.id.toInt(), Intent(c, ReasonReplyReceiver::class.java).putExtra(EXTRA_ID, tx.id), replyFlags
+        )
+        val reply = NotificationCompat.Action.Builder(R.drawable.ic_notif, "ثبت دلیل", replyPi)
+            .addRemoteInput(RemoteInput.Builder(KEY_REASON).setLabel("دلیلش چی بود؟").build())
+            .build()
         val toman = Prefs.toman(c)
         val kind = if (tx.isIncome) "واریز" else "برداشت"
+        val bank = Banks.label(Banks.detect(tx.sender, tx.body, Banks.loadOverrides(c)), tx.card)
         val n = NotificationCompat.Builder(c, CH)
             .setSmallIcon(R.drawable.ic_notif)
             .setContentTitle("$kind ${Fmt.money(tx.amount, toman)} ${Fmt.unit(toman)}")
-            .setContentText("دلیلش چی بود؟ لمس کن و بنویس")
+            .setContentText("$bank · دلیلش چی بود؟")
             .setPriority(NotificationCompat.PRIORITY_HIGH)
             .setCategory(NotificationCompat.CATEGORY_MESSAGE)
             .setAutoCancel(true)
             .setContentIntent(pi)
             .setFullScreenIntent(pi, true)
+            .addAction(reply)
             .build()
         try { NotificationManagerCompat.from(c).notify(tx.id.toInt(), n) } catch (e: SecurityException) { }
+
+        if (Perms.overlay(c)) {
+            try { c.startActivity(intent) } catch (e: Exception) { }
+        }
     }
 }
 
@@ -112,14 +135,19 @@ object TxProcessor {
     private val lock = kotlinx.coroutines.sync.Mutex()
 
     suspend fun process(c: Context, sender: String, body: String, time: Long = System.currentTimeMillis(), dedupe: Boolean = true): Long? {
-        if (Senders.isBlocked(c, sender)) return null
-        val p = SmsParser.parse(body) ?: return null
+        if (Senders.isBlocked(c, sender)) { SmsLog.add(c, sender, body, "نادیده: فرستنده «بانک نیست» شده"); return null }
+        val p = SmsParser.parse(body)
+        if (p == null) { SmsLog.add(c, sender, body, "تراکنش نیست: ${SmsParser.explain(body) ?: "تشخیص داده نشد"}"); return null }
         val tx = Tx(amount = p.amountRial, isIncome = p.isIncome, timestamp = time, sender = sender, body = body, card = p.card, balance = p.balanceRial)
         val dao = AppDb.get(c).dao()
         val id = lock.withLock {
-            if (dedupe && dao.countSame(body, sender, time - SmsImport.SAME_MS, time + SmsImport.SAME_MS) > 0) return null
+            if (dedupe && dao.countSame(body, sender, time - SmsImport.SAME_MS, time + SmsImport.SAME_MS) > 0) {
+                SmsLog.add(c, sender, body, "تکراری (قبلاً ثبت شده)")
+                return null
+            }
             dao.insert(tx)
         }
+        SmsLog.add(c, sender, body, "ثبت شد")
         Notifier.announce(c, tx.copy(id = id))
         com.yadkharj.widget.TxWidget.refresh(c)
         if (!p.isIncome) Budgets.check(c, null)

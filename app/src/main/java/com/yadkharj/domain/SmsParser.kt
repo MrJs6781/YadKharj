@@ -10,7 +10,7 @@ object SmsParser {
         "withdraw", "debit", "بدهکار", "کسر"
     )
     private val skipWords = listOf("رمز", "پویا", "کد تایید", "کد تأیید", "کد فعال", "کد یکبار", "otp", "cvv2", "تخفیف", "قرعه", "جریمه", "خلافی", "راهور")
-    private val currencyWords = listOf("ریال", "تومان", "مانده", "موجودی", "irr", "rial")
+    private val currencyWords = listOf("ریال", "تومان", "مانده", "موجودی", "مبلغ", "irr", "rial")
 
     private val signRegex = Regex("""(?:^|\s)([+-])\s*\d|\d\s*([+-])(?:\s|$)""")
     private val balanceRegex = Regex("""(?i)(?:مانده|موجودی|balance|bal)[^\d\n]{0,12}[-+]?\s*\d[\d,]*(?:\.\d+)?""")
@@ -51,6 +51,17 @@ object SmsParser {
         val rial = if (lower.contains("تومان")) amount * 10 else amount
         val mul = if (lower.contains("تومان")) 10 else 1
         return Parsed(rial, isIncome, card(text), balance(text)?.times(mul))
+    }
+
+    /** اگر [raw] تراکنش بانکی تشخیص داده نمی‌شود، دلیلش را (برای نمایش به کاربر) برمی‌گرداند؛ وگرنه null. */
+    fun explain(raw: String): String? {
+        val text = normalize(raw)
+        val lower = text.lowercase()
+        skipWords.firstOrNull { lower.contains(it) }?.let { return "کلمهٔ ردکننده «$it» داره" }
+        if (currencyWords.none { lower.contains(it) }) return "واحد پول (ریال/تومان/مانده) پیدا نشد"
+        if (direction(text, lower) == null) return "واریز یا برداشت بودنش مشخص نشد"
+        if (amount(text) == null) return "مبلغ پیدا نشد"
+        return null
     }
 
     private fun firstIndex(lower: String, words: List<String>): Int =

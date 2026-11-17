@@ -13,11 +13,21 @@ object SmsImport {
     private const val MAX_ROWS = 5000
     const val SAME_MS = 5 * 60_000L
 
+    /** فقط پیامک‌های جدیدتر از آخرین همگام‌سازی (با ۱۰ دقیقه هم‌پوشانی) را می‌خواند، تا تراکنش‌هایی که کاربر پاک کرده برنگردند. */
+    suspend fun sync(c: Context): Int {
+        val sp = c.getSharedPreferences("smsimport", Context.MODE_PRIVATE)
+        val now = System.currentTimeMillis()
+        val last = sp.getLong("last", now - 3 * 24 * 3600_000L)
+        val n = run(c, last - 10 * 60_000L)
+        sp.edit().putLong("last", now).apply()
+        return n
+    }
+
     /** آیا زمان [ts] کمتر از ۵ دقیقه با یکی از زمان‌های [known] فاصله دارد؟ */
     fun isDuplicate(known: List<Long>?, ts: Long): Boolean = known?.any { abs(it - ts) < SAME_MS } == true
 
     /** تعداد تراکنش‌های جدید را برمی‌گرداند. پیامکی که قبلاً ثبت شده (همان متن، فاصلهٔ کمتر از ۵ دقیقه) رد می‌شود. */
-    suspend fun run(c: Context): Int {
+    suspend fun run(c: Context, sinceMs: Long = 0L): Int {
         val dao = AppDb.get(c).dao()
         val known = dao.all().groupBy({ it.body }, { it.timestamp }).mapValues { it.value.toMutableList() }.toMutableMap()
         val blocked = Senders.blocked(c)
@@ -25,7 +35,9 @@ object SmsImport {
         c.contentResolver.query(
             Telephony.Sms.Inbox.CONTENT_URI,
             arrayOf(Telephony.Sms.ADDRESS, Telephony.Sms.BODY, Telephony.Sms.DATE),
-            null, null, "${Telephony.Sms.DATE} DESC"
+            if (sinceMs > 0) "${Telephony.Sms.DATE} > ?" else null,
+            if (sinceMs > 0) arrayOf(sinceMs.toString()) else null,
+            "${Telephony.Sms.DATE} DESC"
         )?.use { cur ->
             var rows = 0
             while (cur.moveToNext() && rows++ < MAX_ROWS) {

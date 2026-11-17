@@ -1,5 +1,6 @@
 package com.yadkharj.domain
 
+import android.content.Context
 import com.yadkharj.data.Tx
 
 /** color = رنگ تقریبی برند (ARGB) برای نشان دایره‌ای؛ لوگوی واقعی را می‌شود با فایل drawable به نام bank_<key> جایگزین کرد. */
@@ -7,7 +8,8 @@ data class Bank(val key: String, val name: String, val color: Long, val aliases:
 
 object Banks {
     /**
-     * تشخیص از روی نام بانک در متن/فرستنده (نه سرشماره، چون سرشماره‌ها را مطمئن نمی‌دانم).
+     * تشخیص خودکار از روی نام بانک در متن/فرستنده. اگر پیامک اسم بانک را نداشت، کاربر می‌تواند برای هر فرستنده
+     * بانک را دستی تعیین کند (setOverride).
      * نام فارسی کوتاه فقط با پیشوند «بانک» می‌خواند (تا «ملی/ملت/دی» در متن‌های دیگر اشتباه نشود)؛
      * نام لاتین و نام‌های bare=true بدون پیشوند.
      */
@@ -39,23 +41,41 @@ object Banks {
         Bank("post", "پست بانک", 0xFF1976D2, listOf("پست بانک", "postbank"), bare = true),
     )
 
-    fun detect(sender: String, body: String): Bank? {
-        val t = SmsParser.normalize("$sender $body").lowercase()
-        return all.firstOrNull { b -> b.aliases.any { match(t, it, b.bare) } }
+    /** regex یک بار ساخته می‌شود (detect برای هر ردیف لیست صدا زده می‌شود). null = فقط contains ساده. */
+    private val rx: Map<Bank, List<Pair<Regex?, String>>> = all.associateWith { b ->
+        b.aliases.map { a ->
+            val latin = a.all { it.code < 128 }
+            (if (latin || b.bare) null else Regex("بانک\\s*" + Regex.escape(a) + "(?![\\u0600-\\u06FF])")) to a
+        }
     }
 
-    private fun match(t: String, alias: String, bare: Boolean): Boolean {
-        val latin = alias.all { it.code < 128 }
-        return if (latin || bare) t.contains(alias) else Regex("بانک\\s*" + Regex.escape(alias) + "(?![\\u0600-\\u06FF])").containsMatchIn(t)
+    /** [overrides]: فرستنده ← کلید بانک که کاربر دستی تعیین کرده (برای پیامک‌هایی که اسم بانک ندارند). */
+    fun detect(sender: String, body: String, overrides: Map<String, String> = emptyMap()): Bank? {
+        overrides[sender]?.let { k -> all.firstOrNull { it.key == k }?.let { return it } }
+        val t = SmsParser.normalize("$sender $body").lowercase()
+        return all.firstOrNull { b -> rx.getValue(b).any { (re, a) -> if (re == null) t.contains(a) else re.containsMatchIn(t) } }
+    }
+
+    private fun sp(c: Context) = c.getSharedPreferences("bankmap", Context.MODE_PRIVATE)
+
+    fun loadOverrides(c: Context): Map<String, String> =
+        sp(c).getString("v", "").orEmpty().lines().filter { '\t' in it }
+            .associate { it.substringBefore('\t') to it.substringAfter('\t') }
+
+    /** key = null یعنی برگرداندن به تشخیص خودکار. */
+    fun setOverride(c: Context, sender: String, key: String?) {
+        val m = loadOverrides(c).toMutableMap()
+        if (key == null) m.remove(sender) else m[sender] = key
+        sp(c).edit().putString("v", m.entries.joinToString("\n") { "${it.key}\t${it.value}" }).apply()
     }
 
     /** بانکِ هر کارت: از جدیدترین تراکنشی که بانکش تشخیص داده می‌شود. */
-    fun byCard(all: List<Tx>): Map<String, Bank> {
+    fun byCard(all: List<Tx>, overrides: Map<String, String> = emptyMap()): Map<String, Bank> {
         val out = mutableMapOf<String, Bank>()
         for (t in all.sortedByDescending { it.timestamp }) {
             val c = t.card ?: continue
             if (c in out) continue
-            detect(t.sender, t.body)?.let { out[c] = it }
+            detect(t.sender, t.body, overrides)?.let { out[c] = it }
         }
         return out
     }

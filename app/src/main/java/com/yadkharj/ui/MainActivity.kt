@@ -47,6 +47,10 @@ import androidx.lifecycle.viewmodel.compose.viewModel
 import com.yadkharj.data.AppDb
 import com.yadkharj.data.Tx
 import com.yadkharj.domain.Banks
+import com.yadkharj.domain.SmsImport
+import kotlinx.coroutines.Dispatchers
+import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.runtime.rememberCoroutineScope
 import com.yadkharj.domain.Budgets
 import com.yadkharj.domain.Senders
 import com.yadkharj.domain.Fmt
@@ -87,8 +91,17 @@ class MainActivity : ComponentActivity() {
         enableEdgeToEdge()
         Notifier.ensureChannel(this)
         com.yadkharj.domain.RecurringStore.schedule(this)
-        setContent { AppTheme { AppLockGate { App() } } }
+        setContent { AppTheme { AppLockGate { AppRoot() } } }
     }
+}
+
+/** بانک‌هایی که کاربر دستی برای هر فرستنده تعیین کرده را برای همهٔ صفحه‌ها فراهم می‌کند. */
+@Composable
+fun AppRoot() {
+    val ctx = LocalContext.current
+    var bankMap by remember { mutableStateOf(Banks.loadOverrides(ctx)) }
+    val prefs = remember(bankMap) { BankPrefs(bankMap) { s, k -> Banks.setOverride(ctx, s, k); bankMap = Banks.loadOverrides(ctx) } }
+    CompositionLocalProvider(LocalBankPrefs provides prefs) { App() }
 }
 
 @Composable
@@ -99,11 +112,17 @@ fun App(vm: MainVm = viewModel()) {
     var toman by remember { mutableStateOf(Prefs.toman(ctx)) }
     var editing by remember { mutableStateOf<Tx?>(null) }
     var permTick by remember { mutableIntStateOf(0) }
-    LifecycleEventEffect(Lifecycle.Event.ON_RESUME) { permTick++ }
+    val scope = rememberCoroutineScope()
+    LifecycleEventEffect(Lifecycle.Event.ON_RESUME) {
+        permTick++
+        // پیامک‌هایی که برنامه موقع بسته بودن/کشته شدن از دست داده را از صندوق پیامک می‌خواند (اگه مجوز خواندن داده شده باشد).
+        if (Perms.readSms(ctx)) scope.launch(Dispatchers.IO) { runCatching { SmsImport.sync(ctx.applicationContext) } }
+    }
     val smsOk = remember(permTick) { Perms.sms(ctx) }
 
     val cards = remember(all) { all.mapNotNull { it.card }.distinct().sorted() }
-    val cardBanks = remember(all) { Banks.byCard(all) }
+    val bankPrefs = LocalBankPrefs.current
+    val cardBanks = remember(all, bankPrefs.map) { Banks.byCard(all, bankPrefs.map) }
     var pickedCard by rememberSaveable { mutableStateOf<String?>(null) }
     val card = pickedCard?.takeIf { it in cards }
     val xfer = remember(all) { Transfers.ids(all) }

@@ -50,6 +50,7 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.painterResource
 import com.yadkharj.data.Tx
 import com.yadkharj.domain.Bank
+import com.yadkharj.domain.Banks
 import com.yadkharj.domain.Fmt
 import kotlinx.coroutines.delay
 
@@ -107,6 +108,11 @@ fun Chip(text: String, selected: Boolean = false, leading: (@Composable () -> Un
     }
 }
 
+/** بانکی که کاربر دستی برای هر فرستنده تعیین کرده (فرستنده ← کلید بانک)؛ App آن را فراهم می‌کند. */
+class BankPrefs(val map: Map<String, String>, val set: (String, String?) -> Unit)
+
+val LocalBankPrefs = androidx.compose.runtime.compositionLocalOf { BankPrefs(emptyMap()) { _, _ -> } }
+
 /** نشان دایره‌ای بانک: اگر drawable با نام bank_<key> در پروژه باشد همان، وگرنه حرف اول نام روی رنگ برند. */
 @Composable
 fun BankBadge(bank: Bank?, size: Int = 28) {
@@ -114,7 +120,9 @@ fun BankBadge(bank: Bank?, size: Int = 28) {
     val res = remember(bank) { bank?.let { ctx.resources.getIdentifier("bank_${it.key}", "drawable", ctx.packageName) } ?: 0 }
     val m = Modifier.size(size.dp).clip(CircleShape)
     when {
-        bank == null -> Spacer(m)
+        bank == null -> Box(m.background(P.line), contentAlignment = Alignment.Center) {
+            Txt("؟", size = (size * 0.5).toInt(), color = P.muted, weight = FontWeight.Bold)
+        }
         res != 0 -> Image(painterResource(res), bank.name, m)
         else -> Box(m.background(Color(bank.color)), contentAlignment = Alignment.Center) {
             Txt(bank.name.take(1), size = (size * 0.5).toInt(), color = Color.White, weight = FontWeight.Bold)
@@ -164,6 +172,8 @@ fun ReasonCard(
         keyboard?.show()
     }
     val tone = if (tx.isIncome) P.income else P.expense
+    val ctx = LocalContext.current
+    val bank = remember(tx.id) { Banks.detect(tx.sender, tx.body, Banks.loadOverrides(ctx)) }
 
     Column(
         Modifier
@@ -178,6 +188,10 @@ fun ReasonCard(
             Spacer(Modifier.width(8.dp))
             Txt(if (tx.isIncome) "واریز جدید" else "برداشت جدید", size = 13, color = tone, weight = FontWeight.Medium)
             Spacer(Modifier.weight(1f))
+            BankBadge(bank, 22)
+            Spacer(Modifier.width(6.dp))
+            Txt(Banks.label(bank, tx.card).let { if (bank == null && tx.card == null) "بانک نامشخص" else it }, size = 12, color = P.muted, maxLines = 1)
+            Spacer(Modifier.width(10.dp))
             Txt(Fmt.time(tx.timestamp), size = 12, color = P.muted)
         }
         Spacer(Modifier.height(14.dp))

@@ -45,6 +45,10 @@
             android:windowSoftInputMode="adjustResize" />
 
         <receiver
+            android:name=".domain.ReasonReplyReceiver"
+            android:exported="false" />
+
+        <receiver
             android:name=".domain.ReminderReceiver"
             android:exported="true">
             <intent-filter>

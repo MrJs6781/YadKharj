@@ -10,6 +10,7 @@ import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -51,6 +52,7 @@ import com.yadkharj.data.AppDb
 import com.yadkharj.domain.TxCsv
 import com.yadkharj.widget.TxWidget
 import com.yadkharj.domain.Banks
+import com.yadkharj.domain.SmsLog
 import com.yadkharj.domain.Budgets
 import com.yadkharj.domain.Senders
 import com.yadkharj.domain.DayBar
@@ -104,13 +106,19 @@ fun TxScreen(all: List<Tx>, toman: Boolean, smsGranted: Boolean, transferIds: Se
     val pending = all.count { it.reason == null && it.id !in transferIds }
     val filter = TxFilter(query, days, TxFilter.rial(minTxt, toman), TxFilter.rial(maxTxt, toman), onlyPending)
     val entries = remember(all, filter) { buildEntries(filter.apply(all).let { l -> if (onlyPending) l.filter { it.id !in transferIds } else l }) }
-    val cardBanks = remember(all) { Banks.byCard(all) }
+    val bankPrefs = LocalBankPrefs.current
+    val cardBanks = remember(all, bankPrefs.map) { Banks.byCard(all, bankPrefs.map) }
+    val refresh = rememberSmsRefresh()
 
     LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(horizontal = 20.dp, vertical = 12.dp)) {
         item {
             Column(Modifier.padding(top = 16.dp, bottom = 12.dp)) {
                 Txt(Fmt.todayLong(), size = 12, color = P.muted)
-                Txt("تراکنش‌ها", size = 28, weight = FontWeight.Bold)
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Txt("تراکنش‌ها", size = 28, weight = FontWeight.Bold, modifier = Modifier.weight(1f))
+                    Chip(if (refresh.busy) "در حال خواندن…" else "↻ بروزرسانی") { if (!refresh.busy) refresh.run() }
+                }
+                refresh.msg?.let { Txt(it, size = 11, color = P.muted, modifier = Modifier.padding(top = 4.dp)) }
                 Spacer(Modifier.height(12.dp))
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     Chip("همه", selected = !onlyPending) { onlyPending = false }
@@ -142,7 +150,7 @@ fun TxScreen(all: List<Tx>, toman: Boolean, smsGranted: Boolean, transferIds: Se
                 Column(Modifier.fillMaxWidth().padding(bottom = 12.dp).clip(RoundedCornerShape(20.dp)).background(P.surface).padding(18.dp)) {
                     Txt("آخرین مانده", size = 12, color = P.muted)
                     balances.forEach { (c, t) ->
-                        val b = c?.let { cardBanks[it] } ?: Banks.detect(t.sender, t.body)
+                        val b = c?.let { cardBanks[it] } ?: Banks.detect(t.sender, t.body, bankPrefs.map)
                         Row(Modifier.padding(top = 8.dp), verticalAlignment = Alignment.CenterVertically) {
                             BankBadge(b, 24)
                             Spacer(Modifier.width(8.dp))
@@ -192,7 +200,7 @@ private fun TxRow(tx: Tx, toman: Boolean, isTransfer: Boolean = false, onClick: 
     ) {
         Box(Modifier.width(3.dp).height(34.dp).clip(RoundedCornerShape(2.dp)).background(tone))
         Spacer(Modifier.width(12.dp))
-        val bank = remember(tx.sender, tx.body) { Banks.detect(tx.sender, tx.body) }
+        val bank = Banks.detect(tx.sender, tx.body, LocalBankPrefs.current.map)
         BankBadge(bank, 28)
         Spacer(Modifier.width(12.dp))
         Column(Modifier.weight(1f)) {
@@ -201,9 +209,10 @@ private fun TxRow(tx: Tx, toman: Boolean, isTransfer: Boolean = false, onClick: 
             } else {
                 Txt("بدون دلیل — لمس کن", size = 14, color = P.warn, weight = FontWeight.Medium, maxLines = 1)
             }
-            val cardTag = tx.card?.let { " · کارت ${Fmt.digits(it)}" }.orEmpty()
+            val where = if (bank != null) Banks.label(bank, tx.card)
+            else "بانک نامشخص" + (tx.card?.let { " · کارت ${Fmt.digits(it)}" } ?: tx.sender.takeIf { it.isNotEmpty() && it != "manual" }?.let { " ($it)" }.orEmpty())
             val xfer = if (isTransfer) " · انتقال بین کارت‌ها" else ""
-            Txt("${Fmt.time(tx.timestamp)} · ${if (tx.isIncome) "واریز" else "برداشت"}$cardTag$xfer", size = 12, color = P.muted)
+            Txt("$where · ${Fmt.time(tx.timestamp)} · ${if (tx.isIncome) "واریز" else "برداشت"}$xfer", size = 12, color = if (bank == null) P.warn else P.muted, maxLines = 1)
         }
         Spacer(Modifier.width(12.dp))
         Row(verticalAlignment = Alignment.CenterVertically) {
@@ -473,10 +482,22 @@ fun SettingsScreen(all: List<Tx>, toman: Boolean, onToman: (Boolean) -> Unit, pe
                     .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
             )
         }
+        if (Build.VERSION.SDK_INT >= 34) {
+            PermRow("اعلان روی صفحهٔ قفل", "تا وقتی گوشی قفله هم «دلیلش چی بود؟» ظاهر بشه", Perms.fullScreen(ctx)) {
+                AppLock.skipRelock = true
+                ctx.startActivity(
+                    Intent(Settings.ACTION_MANAGE_APP_USE_FULL_SCREEN_INTENT, Uri.parse("package:${ctx.packageName}"))
+                        .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                )
+            }
+        }
         Txt(
             "اگه گفت «App was denied access»: بعد از رد شدن، صفحهٔ اطلاعات برنامه باز می‌شه ← سه‌نقطهٔ بالا ← «Allow restricted settings» ← برگرد و دوباره «فعال‌سازی» رو بزن.",
             size = 11, color = P.muted, modifier = Modifier.padding(top = 8.dp)
         )
+
+        Spacer(Modifier.height(28.dp))
+        SmsLogSection()
 
         Spacer(Modifier.height(28.dp))
         BackupRow(all)
@@ -590,35 +611,51 @@ private fun BackupRow(all: List<Tx>) {
 private fun SendersEditor(all: List<Tx>) {
     val ctx = LocalContext.current
     val scope = rememberCoroutineScope()
+    val prefs = LocalBankPrefs.current
     var blocked by remember { mutableStateOf(Senders.blocked(ctx)) }
     var confirm by remember { mutableStateOf<String?>(null) }
-    val rows = remember(all) {
+    var picking by remember { mutableStateOf<String?>(null) }
+    val rows = remember(all, prefs.map) {
         all.groupBy { it.sender }.filterKeys { it.isNotEmpty() && it != "manual" && it != "TEST" }
-            .map { (s, l) -> Triple(s, l.size, Banks.detect(s, l.first().body)) }
+            .map { (s, l) -> Triple(s, l.size, Banks.detect(s, l.first().body, prefs.map)) }
             .sortedByDescending { it.second }
     }
 
-    Txt("فرستنده‌های پیامک", size = 12, color = P.muted)
+    Txt("فرستنده‌های پیامک و بانک‌شون", size = 12, color = P.muted)
     Spacer(Modifier.height(8.dp))
     if (rows.isEmpty()) Txt("هنوز پیامکی ثبت نشده.", size = 12, color = P.muted)
     rows.forEach { (s, n, bank) ->
-        Row(Modifier.fillMaxWidth().padding(bottom = 8.dp).clip(RoundedCornerShape(18.dp)).background(P.surface).padding(14.dp), verticalAlignment = Alignment.CenterVertically) {
-            BankBadge(bank, 28)
-            Spacer(Modifier.width(10.dp))
-            Column(Modifier.weight(1f)) {
-                Txt(s, size = 14, maxLines = 1)
-                Txt("${Fmt.digits(n.toString())} تراکنش${bank?.let { " · ${it.name}" }.orEmpty()}", size = 11, color = P.muted)
+        Column(Modifier.fillMaxWidth().padding(bottom = 8.dp).clip(RoundedCornerShape(18.dp)).background(P.surface).padding(14.dp)) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                BankBadge(bank, 28)
+                Spacer(Modifier.width(10.dp))
+                Column(Modifier.weight(1f).clickable { picking = if (picking == s) null else s }) {
+                    Txt(s, size = 14, maxLines = 1)
+                    Txt(
+                        "${Fmt.digits(n.toString())} تراکنش · " + (bank?.name ?: "بانک نامشخص — لمس کن و بانک رو انتخاب کن"),
+                        size = 11, color = if (bank == null) P.warn else P.muted
+                    )
+                }
+                Txt(
+                    if (confirm == s) "تأیید حذف" else "بانک نیست", size = 12, color = P.warn,
+                    modifier = Modifier.clickable {
+                        if (confirm != s) confirm = s
+                        else {
+                            confirm = null
+                            scope.launch(Dispatchers.IO) { Senders.block(ctx.applicationContext, s); blocked = Senders.blocked(ctx) }
+                        }
+                    }.padding(6.dp)
+                )
             }
-            Txt(
-                if (confirm == s) "تأیید حذف" else "بانک نیست", size = 12, color = P.warn,
-                modifier = Modifier.clickable {
-                    if (confirm != s) confirm = s
-                    else {
-                        confirm = null
-                        scope.launch(Dispatchers.IO) { Senders.block(ctx.applicationContext, s); blocked = Senders.blocked(ctx) }
+            if (picking == s) {
+                Spacer(Modifier.height(10.dp))
+                Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Chip("خودکار", selected = prefs.map[s] == null) { prefs.set(s, null); picking = null }
+                    Banks.all.forEach { b ->
+                        Chip(b.name, selected = bank?.key == b.key, leading = { BankBadge(b, 18) }) { prefs.set(s, b.key); picking = null }
                     }
-                }.padding(6.dp)
-            )
+                }
+            }
         }
     }
     if (blocked.isNotEmpty()) {
@@ -631,7 +668,37 @@ private fun SendersEditor(all: List<Tx>) {
             }
         }
     }
-    Txt("با «بانک نیست»، تراکنش‌های قبلی این فرستنده پاک می‌شن و پیامک‌های بعدی‌اش ثبت نمی‌شن.", size = 11, color = P.muted, modifier = Modifier.padding(top = 8.dp))
+    Txt("اگه پیامک اسم بانک رو نداره، یه بار روی فرستنده‌اش بزن و بانک رو انتخاب کن؛ از اون به بعد همه‌ٔ پیامک‌هاش با همون بانک ثبت می‌شه. «بانک نیست» تراکنش‌های قبلی اون فرستنده رو پاک می‌کنه و پیامک‌های بعدی‌اش ثبت نمی‌شه.", size = 11, color = P.muted, modifier = Modifier.padding(top = 8.dp))
+}
+
+@Composable
+private fun SmsLogSection() {
+    val ctx = LocalContext.current
+    var items by remember { mutableStateOf(SmsLog.load(ctx)) }
+    Txt("پیامک‌هایی که به برنامه رسیده", size = 12, color = P.muted)
+    Spacer(Modifier.height(8.dp))
+    if (items.isEmpty()) {
+        Txt(
+            "هنوز هیچ پیامکی به برنامه نرسیده. اگه پیامک بانکی اومده ولی اینجا نیست، یعنی گوشی پیامک رو به برنامه نمی‌ده: مجوز پیامک، Autostart و محدودیت باتری برنامه رو چک کن (و با دکمهٔ «بروزرسانی» توی صفحهٔ اصلی از صندوق پیامک بخونش).",
+            size = 12, color = P.muted
+        )
+    }
+    items.forEach { e ->
+        val ok = e.status == "ثبت شد"
+        Column(Modifier.fillMaxWidth().padding(bottom = 8.dp).clip(RoundedCornerShape(18.dp)).background(P.surface).padding(14.dp)) {
+            Row {
+                Txt(e.sender, size = 12, color = P.muted, modifier = Modifier.weight(1f), maxLines = 1)
+                Txt(Fmt.time(e.time), size = 11, color = P.muted)
+            }
+            Txt(e.status, size = 13, weight = FontWeight.Medium, color = if (ok) P.income else P.warn)
+            Txt(e.body.replace('
+', ' ').take(140), size = 11, color = P.muted, maxLines = 2)
+        }
+    }
+    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+        Pill("بازخوانی", filled = false, modifier = Modifier.weight(1f)) { items = SmsLog.load(ctx) }
+        Pill("پاک کردن", filled = false, modifier = Modifier.weight(1f)) { SmsLog.clear(ctx); items = emptyList() }
+    }
 }
 
 @Composable
