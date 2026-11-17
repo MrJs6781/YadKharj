@@ -60,7 +60,8 @@ object SmsImport {
             }
         }
         dao.insertAll(fresh)
+        val removed = Dedupe.clean(c)
         TxWidget.refresh(c)
-        return fresh.size
+        return (fresh.size - removed).coerceAtLeast(0)
     }
 }

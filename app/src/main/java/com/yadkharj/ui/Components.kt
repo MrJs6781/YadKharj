@@ -123,7 +123,9 @@ fun BankBadge(bank: Bank?, size: Int = 28) {
         bank == null -> Box(m.background(P.line), contentAlignment = Alignment.Center) {
             Txt("؟", size = (size * 0.5).toInt(), color = P.muted, weight = FontWeight.Bold)
         }
-        res != 0 -> Image(painterResource(res), bank.name, m)
+        res != 0 -> Box(m.background(Color.White).border(1.dp, P.line, CircleShape), contentAlignment = Alignment.Center) {
+            Image(painterResource(res), bank.name, Modifier.size((size * 0.72).dp), contentScale = androidx.compose.ui.layout.ContentScale.Fit)
+        }
         else -> Box(m.background(Color(bank.color)), contentAlignment = Alignment.Center) {
             Txt(bank.name.take(1), size = (size * 0.5).toInt(), color = Color.White, weight = FontWeight.Bold)
         }
@@ -199,6 +201,10 @@ fun ReasonCard(
             Txt(Fmt.money(tx.amount, toman), size = 34, weight = FontWeight.Bold)
             Spacer(Modifier.width(8.dp))
             Txt(Fmt.unit(toman), size = 13, color = P.muted, modifier = Modifier.padding(bottom = 9.dp))
+        }
+        if (tx.body.isNotBlank()) {
+            Spacer(Modifier.height(10.dp))
+            Txt(tx.body, size = 11, color = P.muted, maxLines = 5)
         }
         Spacer(Modifier.height(18.dp))
 

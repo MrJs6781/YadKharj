@@ -595,9 +595,11 @@ private fun BackupRow(all: List<Tx>) {
                 val dao = AppDb.get(ctx).dao()
                 val have = dao.all().map { Triple(it.timestamp, it.amount, it.isIncome) }.toHashSet()
                 val fresh = list.filter { Triple(it.timestamp, it.amount, it.isIncome) !in have }
+                    .distinctBy { listOf(it.timestamp, it.amount, it.isIncome, SmsImport.key(it.body)) }
                 dao.insertAll(fresh)
+                val removed = com.yadkharj.domain.Dedupe.clean(ctx.applicationContext)
                 TxWidget.refresh(ctx)
-                "${Fmt.digits(fresh.size.toString())} تراکنش جدید بازیابی شد."
+                "${Fmt.digits((fresh.size - removed).coerceAtLeast(0).toString())} تراکنش جدید بازیابی شد."
             }.getOrElse { "فایل خوانده نشد." }
         }
     }
@@ -619,6 +621,8 @@ private fun SendersEditor(all: List<Tx>) {
     var blocked by remember { mutableStateOf(Senders.blocked(ctx)) }
     var confirm by remember { mutableStateOf<String?>(null) }
     var picking by remember { mutableStateOf<String?>(null) }
+    var viewing by remember { mutableStateOf<String?>(null) }
+    val log = remember(viewing) { SmsLog.load(ctx) }
     val rows = remember(all, prefs.map) {
         all.groupBy { it.sender }.filterKeys { it.isNotEmpty() && it != "manual" && it != "TEST" }
             .map { (s, l) -> Triple(s, l.size, Banks.detect(s, l.first().body, prefs.map)) }
@@ -641,6 +645,10 @@ private fun SendersEditor(all: List<Tx>) {
                     )
                 }
                 Txt(
+                    if (viewing == s) "بستن" else "پیام‌ها", size = 12, color = P.muted,
+                    modifier = Modifier.clickable { viewing = if (viewing == s) null else s }.padding(6.dp)
+                )
+                Txt(
                     if (confirm == s) "تأیید حذف" else "بانک نیست", size = 12, color = P.warn,
                     modifier = Modifier.clickable {
                         if (confirm != s) confirm = s
@@ -650,6 +658,24 @@ private fun SendersEditor(all: List<Tx>) {
                         }
                     }.padding(6.dp)
                 )
+            }
+            if (viewing == s) {
+                Spacer(Modifier.height(10.dp))
+                val msgs = all.filter { it.sender == s }.sortedByDescending { it.timestamp }.take(10)
+                val rejected = log.filter { it.sender == s && it.status != "ثبت شد" }
+                if (msgs.isEmpty() && rejected.isEmpty()) Txt("پیامی برای این فرستنده ذخیره نشده.", size = 11, color = P.muted)
+                msgs.forEach { t ->
+                    Column(Modifier.fillMaxWidth().padding(bottom = 8.dp).clip(RoundedCornerShape(12.dp)).background(P.bg).padding(10.dp)) {
+                        Txt("${Fmt.dayLabel(Fmt.date(t.timestamp))} ${Fmt.time(t.timestamp)} · ${if (t.isIncome) "واریز" else "برداشت"} ${Fmt.money(t.amount, true)} تومان", size = 11, color = P.muted)
+                        Txt(t.body.ifBlank { "(ثبت دستی)" }, size = 12)
+                    }
+                }
+                rejected.forEach { e ->
+                    Column(Modifier.fillMaxWidth().padding(bottom = 8.dp).clip(RoundedCornerShape(12.dp)).background(P.bg).padding(10.dp)) {
+                        Txt("${Fmt.time(e.time)} · ${e.status}", size = 11, color = P.warn)
+                        Txt(e.body, size = 12)
+                    }
+                }
             }
             if (picking == s) {
                 Spacer(Modifier.height(10.dp))

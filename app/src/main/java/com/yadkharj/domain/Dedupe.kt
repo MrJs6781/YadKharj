@@ -32,13 +32,11 @@ object Dedupe {
         return out
     }
 
-    suspend fun cleanOnce(c: Context) {
-        val sp = c.getSharedPreferences("dedupe", Context.MODE_PRIVATE)
-        if (sp.getBoolean("v1", false)) return
+    /** هر بار صدا زده می‌شود (شروع برنامه، بعد از واردکردن و بازیابی)، چون پشتیبان CSV هم ممکن است دوتایی داشته باشد. تعداد پاک‌شده را برمی‌گرداند. */
+    suspend fun clean(c: Context): Int {
         val dao = AppDb.get(c).dao()
         val ids = duplicates(dao.all())
-        if (ids.isNotEmpty()) dao.removeIds(ids)
-        sp.edit().putBoolean("v1", true).apply()
-        if (ids.isNotEmpty()) TxWidget.refresh(c)
+        if (ids.isNotEmpty()) { dao.removeIds(ids); TxWidget.refresh(c) }
+        return ids.size
     }
 }
