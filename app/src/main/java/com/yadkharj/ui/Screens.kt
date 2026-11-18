@@ -95,7 +95,10 @@ private fun buildEntries(list: List<Tx>): List<Entry> {
 }
 
 @Composable
-fun TxScreen(all: List<Tx>, toman: Boolean, smsGranted: Boolean, transferIds: Set<Long>, onEdit: (Tx) -> Unit, onOpenSettings: () -> Unit) {
+fun TxScreen(
+    all: List<Tx>, toman: Boolean, smsGranted: Boolean, notifOk: Boolean, transferIds: Set<Long>,
+    onEdit: (Tx) -> Unit, onOpenSettings: () -> Unit, onFixNotif: () -> Unit
+) {
     val ctx = LocalContext.current
     var onlyPending by rememberSaveable { mutableStateOf(false) }
     var query by rememberSaveable { mutableStateOf("") }
@@ -158,6 +161,17 @@ fun TxScreen(all: List<Tx>, toman: Boolean, smsGranted: Boolean, transferIds: Se
                             Txt("${Fmt.money(t.balance!!, toman)} ${Fmt.unit(toman)}", size = 13, weight = FontWeight.Medium)
                         }
                     }
+                }
+            }
+        }
+        if (!notifOk) {
+            item {
+                Column(
+                    Modifier.fillMaxWidth().padding(bottom = 12.dp).clip(RoundedCornerShape(20.dp))
+                        .background(P.surface).clickable(onClick = onFixNotif).padding(18.dp)
+                ) {
+                    Txt("اعلان‌ها خاموشه یا بی‌صداست", size = 14, weight = FontWeight.Medium, color = P.warn)
+                    Txt("بدونش وقتی برنامه بسته‌ست، پیامک بانکی میاد ولی دلیلش پرسیده نمی‌شه. لمس کن و روشنش کن.", size = 12, color = P.muted)
                 }
             }
         }
@@ -491,6 +505,25 @@ fun SettingsScreen(all: List<Tx>, toman: Boolean, onToman: (Boolean) -> Unit, pe
                 )
             }
         }
+        PermRow("بدون محدودیت باتری", "تا گوشی برنامه رو توی پس‌زمینه نکشه و پیامک‌ها از دست نرن", Perms.ignoringBattery(ctx)) {
+            AppLock.skipRelock = true
+            ctx.startActivity(Intent(Settings.ACTION_IGNORE_BATTERY_OPTIMIZATION_SETTINGS).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
+        }
+        if (Build.MANUFACTURER.lowercase().let { "xiaomi" in it || "redmi" in it || "poco" in it }) {
+            PermRow("مجوزهای ویژهٔ شیائومی", "«نمایش پنجره در پس‌زمینه»، «نمایش روی صفحهٔ قفل» و Autostart رو روشن کن", false) {
+                AppLock.skipRelock = true
+                val miui = Intent("miui.intent.action.APP_PERM_EDITOR")
+                    .setClassName("com.miui.securitycenter", "com.miui.permcenter.permissions.PermissionsEditorActivity")
+                    .putExtra("extra_pkgname", ctx.packageName)
+                    .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                try { ctx.startActivity(miui) } catch (e: Exception) {
+                    ctx.startActivity(
+                        Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS, Uri.parse("package:${ctx.packageName}"))
+                            .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                    )
+                }
+            }
+        }
         Txt(
             "اگه گفت «App was denied access»: بعد از رد شدن، صفحهٔ اطلاعات برنامه باز می‌شه ← سه‌نقطهٔ بالا ← «Allow restricted settings» ← برگرد و دوباره «فعال‌سازی» رو بزن.",
             size = 11, color = P.muted, modifier = Modifier.padding(top = 8.dp)
@@ -662,7 +695,7 @@ private fun SendersEditor(all: List<Tx>) {
             if (viewing == s) {
                 Spacer(Modifier.height(10.dp))
                 val msgs = all.filter { it.sender == s }.sortedByDescending { it.timestamp }.take(10)
-                val rejected = log.filter { it.sender == s && it.status != "ثبت شد" }
+                val rejected = log.filter { it.sender == s && !it.status.startsWith("ثبت شد") }
                 if (msgs.isEmpty() && rejected.isEmpty()) Txt("پیامی برای این فرستنده ذخیره نشده.", size = 11, color = P.muted)
                 msgs.forEach { t ->
                     Column(Modifier.fillMaxWidth().padding(bottom = 8.dp).clip(RoundedCornerShape(12.dp)).background(P.bg).padding(10.dp)) {
@@ -714,7 +747,7 @@ private fun SmsLogSection() {
         )
     }
     items.forEach { e ->
-        val ok = e.status == "ثبت شد"
+        val ok = e.status.startsWith("ثبت شد") && e.status.endsWith("اعلان ارسال شد")
         Column(Modifier.fillMaxWidth().padding(bottom = 8.dp).clip(RoundedCornerShape(18.dp)).background(P.surface).padding(14.dp)) {
             Row {
                 Txt(e.sender, size = 12, color = P.muted, modifier = Modifier.weight(1f), maxLines = 1)

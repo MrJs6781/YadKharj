@@ -46,6 +46,13 @@ import androidx.lifecycle.viewModelScope
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.yadkharj.data.AppDb
 import com.yadkharj.data.Tx
+import android.Manifest
+import android.content.Intent
+import android.os.Build
+import android.provider.Settings
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.runtime.LaunchedEffect
 import com.yadkharj.domain.Banks
 import com.yadkharj.domain.SmsImport
 import kotlinx.coroutines.Dispatchers
@@ -122,15 +129,54 @@ fun App(vm: MainVm = viewModel()) {
     }
     val smsOk = remember(permTick) { Perms.sms(ctx) }
 
-    val cards = remember(all) { all.mapNotNull { it.card }.distinct().sorted() }
+    val notifOk = remember(permTick) { Perms.notifReady(ctx) }
+    var askedNotif by remember { mutableStateOf(false) }
+    val notifLauncher = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { permTick++ }
+    LaunchedEffect(Unit) {
+        if (Build.VERSION.SDK_INT >= 33 && !Perms.notif(ctx)) { askedNotif = true; notifLauncher.launch(Manifest.permission.POST_NOTIFICATIONS) }
+    }
+    val fixNotif = {
+        if (Build.VERSION.SDK_INT >= 33 && !Perms.notif(ctx) && !askedNotif) {
+            askedNotif = true
+            notifLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
+        } else {
+            AppLock.skipRelock = true
+            ctx.startActivity(
+                Intent(Settings.ACTION_CHANNEL_NOTIFICATION_SETTINGS)
+                    .putExtra(Settings.EXTRA_APP_PACKAGE, ctx.packageName)
+                    .putExtra(Settings.EXTRA_CHANNEL_ID, Notifier.CH)
+                    .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+            )
+        }
+    }
+
     val bankPrefs = LocalBankPrefs.current
+    val bankOf = remember(all, bankPrefs.map) { all.associate { it.id to (Banks.detect(it.sender, it.body, bankPrefs.map)?.key ?: "") } }
+    val bankKeys = remember(bankOf) { bankOf.values.groupingBy { it }.eachCount().entries.sortedByDescending { it.value }.map { it.key } }
+    var pickedBank by rememberSaveable { mutableStateOf<String?>(null) }
+    val bank = pickedBank?.takeIf { it in bankKeys }
+    val bankView = remember(all, bank, bankOf) { if (bank == null) all else all.filter { bankOf[it.id] == bank } }
+
+    val cards = remember(bankView) { bankView.mapNotNull { it.card }.distinct().sorted() }
     val cardBanks = remember(all, bankPrefs.map) { Banks.byCard(all, bankPrefs.map) }
     var pickedCard by rememberSaveable { mutableStateOf<String?>(null) }
     val card = pickedCard?.takeIf { it in cards }
     val xfer = remember(all) { Transfers.ids(all) }
-    val view = remember(all, card) { if (card == null) all else all.filter { it.card == card } }
+    val view = remember(bankView, card) { if (card == null) bankView else bankView.filter { it.card == card } }
 
     Column(Modifier.fillMaxSize().background(P.bg).statusBarsPadding()) {
+        if (tab < 2 && bankKeys.size >= 2) {
+            Row(
+                Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()).padding(horizontal = 20.dp, vertical = 8.dp),
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                Chip("همه بانک‌ها", selected = bank == null) { pickedBank = null; pickedCard = null }
+                bankKeys.forEach { k ->
+                    val b = Banks.all.firstOrNull { it.key == k }
+                    Chip(b?.name ?: "نامشخص", selected = bank == k, leading = { BankBadge(b, 20) }) { pickedBank = k; pickedCard = null }
+                }
+            }
+        }
         if (tab < 2 && cards.isNotEmpty()) {
             Row(
                 Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()).padding(horizontal = 20.dp, vertical = 8.dp),
@@ -145,7 +191,7 @@ fun App(vm: MainVm = viewModel()) {
         }
         Box(Modifier.weight(1f)) {
             when (tab) {
-                0 -> TxScreen(view, toman, smsOk, xfer, onEdit = { editing = it }, onOpenSettings = { tab = 2 })
+                0 -> TxScreen(view, toman, smsOk, notifOk, xfer, onEdit = { editing = it }, onOpenSettings = { tab = 2 }, onFixNotif = fixNotif)
                 1 -> ReportScreen(remember(view, xfer) { view.filter { it.id !in xfer } }, toman)
                 else -> SettingsScreen(all, toman, { toman = it; Prefs.setToman(ctx, it); com.yadkharj.widget.TxWidget.refresh(ctx) }, permTick) { permTick++ }
             }

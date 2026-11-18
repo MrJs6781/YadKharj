@@ -34,6 +34,16 @@ object Perms {
 
     fun overlay(c: Context) = Settings.canDrawOverlays(c)
 
+    /** اعلان‌ها روشن‌اند و کانال «تراکنش جدید» هدزآپ می‌دهد؟ بدون این، وقتی برنامه بسته است دلیل پرسیده نمی‌شود. */
+    fun notifReady(c: Context): Boolean {
+        val ch = c.getSystemService(NotificationManager::class.java).getNotificationChannel(Notifier.CH)
+        return NotificationManagerCompat.from(c).areNotificationsEnabled() &&
+            (ch?.importance ?: NotificationManager.IMPORTANCE_HIGH) >= NotificationManager.IMPORTANCE_HIGH
+    }
+
+    fun ignoringBattery(c: Context) =
+        c.getSystemService(android.os.PowerManager::class.java).isIgnoringBatteryOptimizations(c.packageName)
+
     /** اندروید ۱۴+: نمایش اعلان روی صفحهٔ قفل/خاموش مجوز جدا دارد. */
     fun fullScreen(c: Context) = Build.VERSION.SDK_INT < 34 ||
         c.getSystemService(NotificationManager::class.java).canUseFullScreenIntent()
@@ -56,7 +66,7 @@ object Suggestions {
 }
 
 object Notifier {
-    private const val CH = "new_tx"
+    const val CH = "new_tx"
     const val EXTRA_ID = "tx_id"
 
     fun ensureChannel(c: Context) {
@@ -91,7 +101,7 @@ object Notifier {
      * اندروید ۱۰+ و پوسته‌هایی مثل MIUI بی‌صدا شکست می‌خورد. اگر «نمایش روی سایر برنامه‌ها» هم داده شده باشد،
      * پنجرهٔ دلیل را هم مستقیم باز می‌کند.
      */
-    fun announce(c: Context, tx: Tx) {
+    fun announce(c: Context, tx: Tx): String {
         val intent = Intent(c, ReasonActivity::class.java)
             .putExtra(EXTRA_ID, tx.id)
             .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_SINGLE_TOP)
@@ -126,6 +136,15 @@ object Notifier {
         if (Perms.overlay(c)) {
             try { c.startActivity(intent) } catch (e: Exception) { }
         }
+
+        val nm = c.getSystemService(NotificationManager::class.java)
+        val importance = nm.getNotificationChannel(CH)?.importance ?: NotificationManager.IMPORTANCE_HIGH
+        return when {
+            !NotificationManagerCompat.from(c).areNotificationsEnabled() -> "اعلان‌ها برای برنامه خاموشه"
+            importance == NotificationManager.IMPORTANCE_NONE -> "کانال «تراکنش جدید» خاموشه"
+            importance < NotificationManager.IMPORTANCE_HIGH -> "کانال اعلان بی‌صدا/کم‌اهمیته (هدزآپ نمی‌شه)"
+            else -> "اعلان ارسال شد"
+        }
     }
 }
 
@@ -147,8 +166,8 @@ object TxProcessor {
             }
             dao.insert(tx)
         }
-        SmsLog.add(c, sender, body, "ثبت شد")
-        Notifier.announce(c, tx.copy(id = id))
+        val note = runCatching { Notifier.announce(c, tx.copy(id = id)) }.getOrElse { "خطا در اعلان: ${it.javaClass.simpleName}" }
+        SmsLog.add(c, sender, body, "ثبت شد · $note")
         com.yadkharj.widget.TxWidget.refresh(c)
         if (!p.isIncome) Budgets.check(c, null)
         return id
