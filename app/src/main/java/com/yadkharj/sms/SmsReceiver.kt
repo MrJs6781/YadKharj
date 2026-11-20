@@ -21,8 +21,9 @@ class SmsReceiver : BroadcastReceiver() {
             try {
                 for ((sender, parts) in bySender) {
                     val body = parts.joinToString("") { it.messageBody ?: "" }
+                    val time = parts.maxOf { it.timestampMillis }
                     // هر خطایی (دیتابیس، اعلان...) نباید پردازه را بکشد و پیامک‌های بعدی را هم از بین ببرد.
-                    try { TxProcessor.process(app, sender, body) }
+                    try { TxProcessor.process(app, sender, body, time) }
                     catch (e: Exception) { SmsLog.add(app, sender, body, "خطا: ${e.javaClass.simpleName} ${e.message.orEmpty()}") }
                 }
             } finally {

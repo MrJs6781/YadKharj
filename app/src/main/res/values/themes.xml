@@ -2,6 +2,12 @@
     <style name="Theme.App" parent="android:Theme.DeviceDefault.NoActionBar">
         <item name="android:windowBackground">@color/app_bg</item>
     </style>
+    <style name="Theme.App.Starting" parent="Theme.SplashScreen">
+        <item name="android:windowBackground">@color/icon_bg</item>
+        <item name="windowSplashScreenBackground">@color/icon_bg</item>
+        <item name="windowSplashScreenAnimatedIcon">@drawable/ic_launcher_fg</item>
+        <item name="postSplashScreenTheme">@style/Theme.App</item>
+    </style>
     <style name="Theme.App.Popup" parent="android:Theme.DeviceDefault.NoActionBar">
         <item name="android:windowIsTranslucent">true</item>
         <item name="android:windowBackground">@android:color/transparent</item>

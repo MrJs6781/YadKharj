@@ -35,7 +35,8 @@ object Dedupe {
     /** هر بار صدا زده می‌شود (شروع برنامه، بعد از واردکردن و بازیابی)، چون پشتیبان CSV هم ممکن است دوتایی داشته باشد. تعداد پاک‌شده را برمی‌گرداند. */
     suspend fun clean(c: Context): Int {
         val dao = AppDb.get(c).dao()
-        val ids = duplicates(dao.all())
+        // تراکنش‌های پنهانِ «بانک نیست» در خوشهٔ تکرار شرکت نمی‌کنند تا نسخهٔ دیدنی حذف نشود.
+        val ids = duplicates(dao.all().filter { it.sender !in Senders.blocked(c) })
         if (ids.isNotEmpty()) { dao.removeIds(ids); TxWidget.refresh(c) }
         return ids.size
     }

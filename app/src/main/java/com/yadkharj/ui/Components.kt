@@ -109,9 +109,9 @@ fun Chip(text: String, selected: Boolean = false, leading: (@Composable () -> Un
 }
 
 /** بانکی که کاربر دستی برای هر فرستنده تعیین کرده (فرستنده ← کلید بانک)؛ App آن را فراهم می‌کند. */
-class BankPrefs(val map: Map<String, String>, val set: (String, String?) -> Unit)
+class BankPrefs(val map: Map<String, String>, val set: (String, String?) -> Unit, val reload: () -> Unit = {})
 
-val LocalBankPrefs = androidx.compose.runtime.compositionLocalOf { BankPrefs(emptyMap()) { _, _ -> } }
+val LocalBankPrefs = androidx.compose.runtime.compositionLocalOf { BankPrefs(emptyMap(), { _, _ -> }) }
 
 /** نشان دایره‌ای بانک: اگر drawable با نام bank_<key> در پروژه باشد همان، وگرنه حرف اول نام روی رنگ برند. */
 @Composable
@@ -168,13 +168,21 @@ fun ReasonCard(
     var text by remember(tx.id) { mutableStateOf(initial) }
     val focus = remember { FocusRequester() }
     val keyboard = LocalSoftwareKeyboardController.current
+    val ctx = LocalContext.current
+    val locked = remember {
+        (ctx.getSystemService(android.content.Context.KEYGUARD_SERVICE) as? android.app.KeyguardManager)?.isKeyguardLocked == true
+    }
     LaunchedEffect(tx.id) {
-        delay(250)
-        runCatching { focus.requestFocus() }
+        if (locked) return@LaunchedEffect
+        // چند تلاش کوتاه: گاهی پنجره هنوز به درخت ویو وصل نشده و requestFocus خطا می‌دهد.
+        for (wait in longArrayOf(80, 250, 600)) {
+            delay(wait)
+            if (runCatching { focus.requestFocus() }.isSuccess) break
+        }
+        delay(200)
         keyboard?.show()
     }
     val tone = if (tx.isIncome) P.income else P.expense
-    val ctx = LocalContext.current
     val bank = remember(tx.id) { Banks.detect(tx.sender, tx.body, Banks.loadOverrides(ctx)) }
 
     Column(
@@ -226,6 +234,10 @@ fun ReasonCard(
                 modifier = Modifier.fillMaxWidth().focusRequester(focus)
             )
         }
+        if (locked) {
+            Spacer(Modifier.height(8.dp))
+            Txt("برای تایپ، قفل گوشی را باز کنید.", size = 12, color = P.muted)
+        }
         Spacer(Modifier.height(12.dp))
         FlowRow(
             horizontalArrangement = Arrangement.spacedBy(8.dp),
@@ -241,7 +253,7 @@ fun ReasonCard(
         }
         if (onNotBank != null) {
             Txt(
-                "این فرستنده بانک نیست (حذف از لیست)", size = 12, color = P.muted, align = TextAlign.Center,
+                "این فرستنده بانک نیست (پنهان می‌شود؛ پیام‌ها می‌مانند)", size = 12, color = P.muted, align = TextAlign.Center,
                 modifier = Modifier.fillMaxWidth().padding(top = 14.dp).clickable(onClick = onNotBank)
             )
         }

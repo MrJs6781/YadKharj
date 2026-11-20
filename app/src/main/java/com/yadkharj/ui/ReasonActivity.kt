@@ -51,6 +51,10 @@ class ReasonActivity : ComponentActivity() {
                 WindowManager.LayoutParams.FLAG_SHOW_WHEN_LOCKED or WindowManager.LayoutParams.FLAG_TURN_SCREEN_ON
             )
         }
+        // تا وقتی پنجره باز می‌شود کیبورد بدون نیاز به لمس بالا بیاید.
+        window.setSoftInputMode(
+            WindowManager.LayoutParams.SOFT_INPUT_ADJUST_RESIZE or WindowManager.LayoutParams.SOFT_INPUT_STATE_ALWAYS_VISIBLE
+        )
         txId = intent.getLongExtra(Notifier.EXTRA_ID, -1L)
         setContent { AppTheme { PopupHost(txId) { finish() } } }
     }

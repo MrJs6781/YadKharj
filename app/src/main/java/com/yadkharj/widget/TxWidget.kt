@@ -15,6 +15,7 @@ import com.yadkharj.domain.Period
 import com.yadkharj.domain.Periods
 import com.yadkharj.domain.Prefs
 import com.yadkharj.domain.Reports
+import com.yadkharj.domain.Senders
 import com.yadkharj.ui.MainActivity
 import com.yadkharj.ui.QuickAddActivity
 import kotlinx.coroutines.CoroutineScope
@@ -42,7 +43,7 @@ class TxWidget : AppWidgetProvider() {
         }
 
         private suspend fun render(c: Context, m: AppWidgetManager, ids: IntArray) {
-            val all = Transfers.without(AppDb.get(c).dao().all())
+            val all = Transfers.without(AppDb.get(c).dao().all().filter { it.sender !in Senders.blocked(c) })
             val today = LocalDate.now()
             val toman = Prefs.toman(c)
             val day = Reports.build(all, Period(today, today.plusDays(1), "", false)).expense

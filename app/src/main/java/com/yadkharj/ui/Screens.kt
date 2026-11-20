@@ -28,6 +28,7 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
@@ -55,6 +56,7 @@ import com.yadkharj.domain.Banks
 import com.yadkharj.domain.SmsLog
 import com.yadkharj.domain.Budgets
 import com.yadkharj.domain.Senders
+import com.yadkharj.domain.SenderArchive
 import com.yadkharj.domain.DayBar
 import com.yadkharj.domain.Delta
 import com.yadkharj.domain.Fmt
@@ -64,6 +66,7 @@ import com.yadkharj.domain.monthlyBars
 import com.yadkharj.domain.Perms
 import android.content.pm.PackageManager
 import androidx.core.content.ContextCompat
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.yadkharj.domain.SmsImport
 import com.yadkharj.domain.Recurring
 import com.yadkharj.domain.RecurringStore
@@ -74,6 +77,7 @@ import com.yadkharj.domain.TxFilter
 import com.yadkharj.domain.TxProcessor
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import java.time.LocalDate
 
 /* ───────────── تراکنش‌ها ───────────── */
@@ -183,6 +187,23 @@ fun TxScreen(
                 ) {
                     Txt("برای شروع، دسترسی پیامک رو فعال کن", size = 14, weight = FontWeight.Medium)
                     Txt("لمس کن تا به تنظیمات بریم", size = 12, color = P.muted)
+                }
+            }
+        }
+        if (smsGranted && notifOk && !Perms.overlay(ctx)) {
+            item {
+                Column(
+                    Modifier.fillMaxWidth().padding(bottom = 12.dp).clip(RoundedCornerShape(20.dp))
+                        .background(P.surface).clickable {
+                            AppLock.skipRelock = true
+                            ctx.startActivity(
+                                Intent(Settings.ACTION_MANAGE_OVERLAY_PERMISSION, Uri.parse("package:${ctx.packageName}"))
+                                    .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                            )
+                        }.padding(18.dp)
+                ) {
+                    Txt("پنجرهٔ دلیل وقتی برنامه بسته‌ست باز نمی‌شه؟", size = 14, weight = FontWeight.Medium)
+                    Txt("این اجازه رو روشن کن تا پنجرهٔ نوشتن دلیل روی همهٔ برنامه‌ها باز بشه. تا اون موقع هم می‌تونی از دکمهٔ «ثبت دلیل» روی خودِ اعلان استفاده کنی.", size = 12, color = P.muted)
                 }
             }
         }
@@ -478,7 +499,7 @@ fun SettingsScreen(all: List<Tx>, toman: Boolean, onToman: (Boolean) -> Unit, pe
 
     Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(horizontal = 20.dp)) {
         Spacer(Modifier.height(16.dp))
-        Txt("تنظیمات", size = 28, weight = FontWeight.Bold)
+        Txt("YadKharj", size = 28, weight = FontWeight.Bold)
         Spacer(Modifier.height(20.dp))
 
         Txt("دسترسی‌ها", size = 12, color = P.muted)
@@ -509,6 +530,10 @@ fun SettingsScreen(all: List<Tx>, toman: Boolean, onToman: (Boolean) -> Unit, pe
             AppLock.skipRelock = true
             ctx.startActivity(Intent(Settings.ACTION_IGNORE_BATTERY_OPTIMIZATION_SETTINGS).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
         }
+        Txt(
+            "برنامه یک سرویس پس‌زمینهٔ سبک روشن نگه می‌دارد تا پیامک بانکی همان لحظه شناسایی شود؛ این سرویس به اینترنت وصل نمی‌شود و فقط در نوار اعلان یک نشانهٔ بی‌صدا دارد.",
+            size = 11, color = P.muted, modifier = Modifier.padding(top = 8.dp)
+        )
         if (Build.MANUFACTURER.lowercase().let { "xiaomi" in it || "redmi" in it || "poco" in it }) {
             PermRow("مجوزهای ویژهٔ شیائومی", "«نمایش پنجره در پس‌زمینه»، «نمایش روی صفحهٔ قفل» و Autostart رو روشن کن", false) {
                 AppLock.skipRelock = true
@@ -536,7 +561,7 @@ fun SettingsScreen(all: List<Tx>, toman: Boolean, onToman: (Boolean) -> Unit, pe
         BackupRow(all)
 
         Spacer(Modifier.height(28.dp))
-        SendersEditor(all)
+        SendersEditor(all, toman)
 
         Spacer(Modifier.height(28.dp))
         ImportRow()
@@ -608,12 +633,15 @@ private fun BudgetEditor(toman: Boolean) {
 private fun BackupRow(all: List<Tx>) {
     val ctx = LocalContext.current
     val scope = rememberCoroutineScope()
+    val bankPrefs = LocalBankPrefs.current
     var msg by remember { mutableStateOf<String?>(null) }
     val export = rememberLauncherForActivityResult(ActivityResultContracts.CreateDocument("text/csv")) { uri ->
         if (uri != null) scope.launch(Dispatchers.IO) {
             msg = runCatching {
-                ctx.contentResolver.openOutputStream(uri)!!.use { it.write(TxCsv.write(all, TxCsv.Extras(Senders.blocked(ctx), Banks.loadOverrides(ctx))).toByteArray(Charsets.UTF_8)) }
-                "${Fmt.digits(all.size.toString())} تراکنش ذخیره شد."
+                // فرستنده‌های پنهان‌شده هم در خروجی باشند؛ وگرنه با بازیابی ناقص می‌شود.
+                val rows = runCatching { AppDb.get(ctx).dao().all() }.getOrElse { all }
+                ctx.contentResolver.openOutputStream(uri)!!.use { it.write(TxCsv.write(rows, TxCsv.Extras(Senders.blocked(ctx), Banks.loadOverrides(ctx))).toByteArray(Charsets.UTF_8)) }
+                "${Fmt.digits(rows.size.toString())} تراکنش ذخیره شد."
             }.getOrElse { "ذخیره نشد." }
         }
     }
@@ -625,6 +653,7 @@ private fun BackupRow(all: List<Tx>) {
                 val extras = TxCsv.readExtras(text)
                 Senders.addAll(ctx, extras.blocked)
                 extras.banks.forEach { (s, k) -> Banks.setOverride(ctx, s, k) }
+                withContext(Dispatchers.Main) { bankPrefs.reload() }
                 val dao = AppDb.get(ctx).dao()
                 val have = dao.all().map { Triple(it.timestamp, it.amount, it.isIncome) }.toHashSet()
                 val fresh = list.filter { Triple(it.timestamp, it.amount, it.isIncome) !in have }
@@ -647,19 +676,31 @@ private fun BackupRow(all: List<Tx>) {
 }
 
 @Composable
-private fun SendersEditor(all: List<Tx>) {
+private fun SendersEditor(all: List<Tx>, toman: Boolean) {
     val ctx = LocalContext.current
     val scope = rememberCoroutineScope()
     val prefs = LocalBankPrefs.current
-    var blocked by remember { mutableStateOf(Senders.blocked(ctx)) }
+    val blocked by Senders.blockedFlow.collectAsStateWithLifecycle()
     var confirm by remember { mutableStateOf<String?>(null) }
     var picking by remember { mutableStateOf<String?>(null) }
     var viewing by remember { mutableStateOf<String?>(null) }
+    var msgs by remember { mutableStateOf<Map<String, List<Tx>>>(emptyMap()) }
+    var arch by remember { mutableStateOf<Map<String, List<SenderArchive.Msg>>>(emptyMap()) }
     val log = remember(viewing) { SmsLog.load(ctx) }
     val rows = remember(all, prefs.map) {
         all.groupBy { it.sender }.filterKeys { it.isNotEmpty() && it != "manual" && it != "TEST" }
             .map { (s, l) -> Triple(s, l.size, Banks.detect(s, l.first().body, prefs.map)) }
             .sortedByDescending { it.second }
+    }
+    // فرستندههای «بانک نیست» در [all] نیستند؛ تراکنشهای پنهان و پیامکهای آرشیوشده را فقط هنگام «پیامها» میخوانیم.
+    LaunchedEffect(viewing) {
+        val s = viewing ?: return@LaunchedEffect
+        val app = ctx.applicationContext
+        val loaded = withContext(Dispatchers.IO) {
+            runCatching { AppDb.get(app).dao().bySender(s, 20) }.getOrDefault(emptyList()) to SenderArchive.load(app, s)
+        }
+        msgs = msgs + (s to loaded.first)
+        arch = arch + (s to loaded.second)
     }
 
     Txt("فرستنده‌های پیامک و بانک‌شون", size = 12, color = P.muted)
@@ -682,24 +723,25 @@ private fun SendersEditor(all: List<Tx>) {
                     modifier = Modifier.clickable { viewing = if (viewing == s) null else s }.padding(6.dp)
                 )
                 Txt(
-                    if (confirm == s) "تأیید حذف" else "بانک نیست", size = 12, color = P.warn,
+                    if (confirm == s) "تأیید پنهان‌سازی" else "بانک نیست", size = 12, color = P.warn,
                     modifier = Modifier.clickable {
                         if (confirm != s) confirm = s
                         else {
                             confirm = null
-                            scope.launch(Dispatchers.IO) { Senders.block(ctx.applicationContext, s); blocked = Senders.blocked(ctx) }
+                            if (viewing == s) viewing = null
+                            scope.launch(Dispatchers.IO) { Senders.block(ctx.applicationContext, s) }
                         }
                     }.padding(6.dp)
                 )
             }
             if (viewing == s) {
                 Spacer(Modifier.height(10.dp))
-                val msgs = all.filter { it.sender == s }.sortedByDescending { it.timestamp }.take(10)
+                val list = msgs[s] ?: all.filter { it.sender == s }.sortedByDescending { it.timestamp }.take(20)
                 val rejected = log.filter { it.sender == s && !it.status.startsWith("ثبت شد") }
-                if (msgs.isEmpty() && rejected.isEmpty()) Txt("پیامی برای این فرستنده ذخیره نشده.", size = 11, color = P.muted)
-                msgs.forEach { t ->
+                if (list.isEmpty() && rejected.isEmpty()) Txt("پیامی برای این فرستنده ذخیره نشده.", size = 11, color = P.muted)
+                list.forEach { t ->
                     Column(Modifier.fillMaxWidth().padding(bottom = 8.dp).clip(RoundedCornerShape(12.dp)).background(P.bg).padding(10.dp)) {
-                        Txt("${Fmt.dayLabel(Fmt.date(t.timestamp))} ${Fmt.time(t.timestamp)} · ${if (t.isIncome) "واریز" else "برداشت"} ${Fmt.money(t.amount, true)} تومان", size = 11, color = P.muted)
+                        Txt("${Fmt.dayLabel(Fmt.date(t.timestamp))} ${Fmt.time(t.timestamp)} · ${if (t.isIncome) "واریز" else "برداشت"} ${Fmt.money(t.amount, toman)} ${Fmt.unit(toman)}", size = 11, color = P.muted)
                         Txt(t.body.ifBlank { "(ثبت دستی)" }, size = 12)
                     }
                 }
@@ -723,15 +765,45 @@ private fun SendersEditor(all: List<Tx>) {
     }
     if (blocked.isNotEmpty()) {
         Spacer(Modifier.height(8.dp))
-        Txt("نادیده‌گرفته‌شده‌ها", size = 12, color = P.muted)
-        blocked.forEach { s ->
-            Row(Modifier.fillMaxWidth().padding(top = 8.dp), verticalAlignment = Alignment.CenterVertically) {
-                Txt(s, size = 13, modifier = Modifier.weight(1f), maxLines = 1)
-                Txt("بازگرداندن", size = 12, color = P.muted, modifier = Modifier.clickable { Senders.unblock(ctx, s); blocked = Senders.blocked(ctx) }.padding(6.dp))
+        Txt("«بانک نیست»شده‌ها (پنهان)", size = 12, color = P.muted)
+        blocked.sorted().forEach { s ->
+            Column(Modifier.fillMaxWidth().padding(top = 8.dp).clip(RoundedCornerShape(18.dp)).background(P.surface).padding(14.dp)) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Txt(s, size = 13, modifier = Modifier.weight(1f), maxLines = 1)
+                    Txt(
+                        if (viewing == s) "بستن" else "پیام‌ها", size = 12, color = P.muted,
+                        modifier = Modifier.clickable { viewing = if (viewing == s) null else s }.padding(6.dp)
+                    )
+                    Txt(
+                        "بازگرداندن", size = 12, color = P.accent,
+                        modifier = Modifier.clickable {
+                            if (viewing == s) viewing = null
+                            Senders.unblock(ctx, s)
+                        }.padding(6.dp)
+                    )
+                }
+                if (viewing == s) {
+                    Spacer(Modifier.height(8.dp))
+                    val list = msgs[s].orEmpty().take(20)
+                    val kept = arch[s].orEmpty().take(20)
+                    if (list.isEmpty() && kept.isEmpty()) Txt("پیام تازه‌ای از این فرستنده ذخیره نشده؛ فقط تراکنش‌های قبلی‌اش پنهان‌اند.", size = 11, color = P.muted)
+                    list.forEach { t ->
+                        Column(Modifier.fillMaxWidth().padding(bottom = 8.dp).clip(RoundedCornerShape(12.dp)).background(P.bg).padding(10.dp)) {
+                            Txt("${Fmt.dayLabel(Fmt.date(t.timestamp))} ${Fmt.time(t.timestamp)} · ثبت‌شدهٔ قبلی · ${Fmt.money(t.amount, toman)} ${Fmt.unit(toman)}", size = 11, color = P.muted)
+                            Txt(t.body.ifBlank { "(ثبت دستی)" }, size = 12)
+                        }
+                    }
+                    kept.forEach { m ->
+                        Column(Modifier.fillMaxWidth().padding(bottom = 8.dp).clip(RoundedCornerShape(12.dp)).background(P.bg).padding(10.dp)) {
+                            Txt("${Fmt.dayLabel(Fmt.date(m.time))} ${Fmt.time(m.time)} · ثبت نشد", size = 11, color = P.warn)
+                            Txt(m.body, size = 12)
+                        }
+                    }
+                }
             }
         }
     }
-    Txt("اگه پیامک اسم بانک رو نداره، یه بار روی فرستنده‌اش بزن و بانک رو انتخاب کن؛ از اون به بعد همه‌ٔ پیامک‌هاش با همون بانک ثبت می‌شه. «بانک نیست» تراکنش‌های قبلی اون فرستنده رو پاک می‌کنه و پیامک‌های بعدی‌اش ثبت نمی‌شه.", size = 11, color = P.muted, modifier = Modifier.padding(top = 8.dp))
+    Txt("اگه پیامک اسم بانک رو نداره، یه بار روی فرستنده‌اش بزن و بانک رو انتخاب کن؛ از اون به بعد همهٔ پیامک‌هاش با همون بانک ثبت می‌شه. «بانک نیست» تراکنش‌های قبلی رو فقط پنهان می‌کنه (پاک نمی‌شن)، پیامک‌های بعدی رو ثبت نمی‌کنه و آخرین پیام‌هاش رو برای بازبینی نگه می‌داره؛ با «بازگرداندن» همه‌چیز برمی‌گرده.", size = 11, color = P.muted, modifier = Modifier.padding(top = 8.dp))
 }
 
 @Composable

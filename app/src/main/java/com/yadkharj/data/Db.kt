@@ -41,6 +41,9 @@ interface TxDao {
     @Query("SELECT * FROM tx WHERE id = :id")
     suspend fun get(id: Long): Tx?
 
+    @Query("SELECT * FROM tx WHERE sender = :sender ORDER BY timestamp DESC LIMIT :limit")
+    suspend fun bySender(sender: String, limit: Int): List<Tx>
+
     @Query("SELECT reason FROM tx WHERE reason IS NOT NULL AND isIncome = :income ORDER BY timestamp DESC LIMIT 200")
     suspend fun recentReasons(income: Boolean): List<String>
 
@@ -61,9 +64,6 @@ interface TxDao {
 
     @Query("UPDATE tx SET reason = :reason WHERE id = :id")
     suspend fun setReason(id: Long, reason: String?)
-
-    @Query("DELETE FROM tx WHERE sender = :sender")
-    suspend fun removeBySender(sender: String)
 
     @Query("DELETE FROM tx WHERE id = :id")
     suspend fun remove(id: Long)

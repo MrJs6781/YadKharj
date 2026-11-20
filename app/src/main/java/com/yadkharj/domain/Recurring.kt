@@ -61,7 +61,10 @@ object RecurringStore {
 
 class ReminderReceiver : BroadcastReceiver() {
     override fun onReceive(context: Context, intent: Intent) {
-        if (intent.action == Intent.ACTION_BOOT_COMPLETED) RecurringStore.schedule(context)
+        if (intent.action == Intent.ACTION_BOOT_COMPLETED) {
+            RecurringStore.schedule(context)
+            com.yadkharj.sms.SmsWatchService.start(context)
+        }
         RecurringStore.check(context)
     }
 

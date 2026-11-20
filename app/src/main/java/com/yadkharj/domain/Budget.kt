@@ -41,7 +41,7 @@ object Budgets {
     suspend fun check(c: Context, reason: String?, today: LocalDate = LocalDate.now()) {
         val budgets = load(c)
         if (budgets.isEmpty()) return
-        val all = AppDb.get(c).dao().all()
+        val all = AppDb.get(c).dao().all().filter { it.sender !in Senders.blocked(c) }
         val month = Periods.month(0, today)
         val key = reason?.trim()
         for (st in status(budgets, all, month)) {

@@ -5,6 +5,7 @@ import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
+import androidx.core.splashscreen.SplashScreen.Companion.installSplashScreen
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
@@ -67,12 +68,18 @@ import com.yadkharj.domain.Prefs
 import com.yadkharj.domain.Suggestions
 import com.yadkharj.domain.Transfers
 import kotlinx.coroutines.flow.SharingStarted
+import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 
 class MainVm(app: Application) : AndroidViewModel(app) {
     private val dao = AppDb.get(app).dao()
-    val all = dao.observeAll().stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
+
+    init { Senders.blocked(app) }
+
+    /** فرستنده‌های «بانک نیست» از همه‌جا پنهان می‌شوند ولی ردیف‌هایشان در دیتابیس می‌ماند. */
+    val all = combine(dao.observeAll(), Senders.blockedFlow) { list, blocked -> Senders.visible(list, blocked) }
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
 
     fun setReason(id: Long, reason: String) {
         viewModelScope.launch {
@@ -94,14 +101,21 @@ class MainVm(app: Application) : AndroidViewModel(app) {
 
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
+        installSplashScreen()
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
         Notifier.ensureChannel(this)
+        com.yadkharj.sms.SmsWatchService.start(this)
         val app = applicationContext
         kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.Dispatchers.IO).launch { runCatching { com.yadkharj.domain.Dedupe.clean(app) } }
         com.yadkharj.domain.RecurringStore.schedule(this)
-        setContent { AppTheme { AppLockGate { AppRoot() } } }
+        setContent { AppTheme { SplashGate { AppLockGate { AppRoot() } } } }
     }
+}
+
+/** آیا صفحهٔ اصلی الان دیده می‌شود؟ اجازهٔ باز کردن پنجرهٔ دلیل از پس‌زمینه فقط با «نمایش روی سایر برنامه‌ها» بود؛ در پیش‌زمینه لازم نیست. */
+object AppVisible {
+    @Volatile var visible = false
 }
 
 /** بانک‌هایی که کاربر دستی برای هر فرستنده تعیین کرده را برای همهٔ صفحه‌ها فراهم می‌کند. */
@@ -109,7 +123,9 @@ class MainActivity : ComponentActivity() {
 fun AppRoot() {
     val ctx = LocalContext.current
     var bankMap by remember { mutableStateOf(Banks.loadOverrides(ctx)) }
-    val prefs = remember(bankMap) { BankPrefs(bankMap) { s, k -> Banks.setOverride(ctx, s, k); bankMap = Banks.loadOverrides(ctx) } }
+    val prefs = remember(bankMap) {
+        BankPrefs(bankMap, set = { s, k -> Banks.setOverride(ctx, s, k); bankMap = Banks.loadOverrides(ctx) }, reload = { bankMap = Banks.loadOverrides(ctx) })
+    }
     CompositionLocalProvider(LocalBankPrefs provides prefs) { App() }
 }
 
@@ -122,6 +138,8 @@ fun App(vm: MainVm = viewModel()) {
     var editing by remember { mutableStateOf<Tx?>(null) }
     var permTick by remember { mutableIntStateOf(0) }
     val scope = rememberCoroutineScope()
+    LifecycleEventEffect(Lifecycle.Event.ON_START) { AppVisible.visible = true }
+    LifecycleEventEffect(Lifecycle.Event.ON_STOP) { AppVisible.visible = false }
     LifecycleEventEffect(Lifecycle.Event.ON_RESUME) {
         permTick++
         // پیامک‌هایی که برنامه موقع بسته بودن/کشته شدن از دست داده را از صندوق پیامک می‌خواند (اگه مجوز خواندن داده شده باشد).

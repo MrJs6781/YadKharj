@@ -133,7 +133,7 @@ object Notifier {
             .build()
         try { NotificationManagerCompat.from(c).notify(tx.id.toInt(), n) } catch (e: SecurityException) { }
 
-        if (Perms.overlay(c)) {
+        if (Perms.overlay(c) || com.yadkharj.ui.AppVisible.visible) {
             try { c.startActivity(intent) } catch (e: Exception) { }
         }
 
@@ -154,7 +154,11 @@ object TxProcessor {
     private val lock = kotlinx.coroutines.sync.Mutex()
 
     suspend fun process(c: Context, sender: String, body: String, time: Long = System.currentTimeMillis(), dedupe: Boolean = true): Long? {
-        if (Senders.isBlocked(c, sender)) { SmsLog.add(c, sender, body, "نادیده: فرستنده «بانک نیست» شده"); return null }
+        if (Senders.isBlocked(c, sender)) {
+            SenderArchive.add(c, sender, body, time)
+            SmsLog.add(c, sender, body, "نادیده: فرستنده «بانک نیست» شده (پیام در آرشیو ماند)")
+            return null
+        }
         val p = SmsParser.parse(body)
         if (p == null) { SmsLog.add(c, sender, body, "تراکنش نیست: ${SmsParser.explain(body) ?: "تشخیص داده نشد"}"); return null }
         val tx = Tx(amount = p.amountRial, isIncome = p.isIncome, timestamp = time, sender = sender, body = body, card = p.card, balance = p.balanceRial)

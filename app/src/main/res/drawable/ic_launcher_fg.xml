@@ -1,6 +1,20 @@
 <vector xmlns:android="http://schemas.android.com/apk/res/android"
     android:width="108dp" android:height="108dp"
     android:viewportWidth="108" android:viewportHeight="108">
-    <path android:fillColor="#F6F5F2" android:pathData="M54,30 a24,24 0 1,0 0.001,0 z" />
-    <path android:fillColor="#1F7A5C" android:pathData="M54,44 a10,10 0 1,0 0.001,0 z" />
+    <!-- رسید کاغذی -->
+    <path
+        android:fillColor="#F6F5F2"
+        android:pathData="M42,28 h20 a8,8 0 0 1 8,8 v36 a8,8 0 0 1 -8,8 h-20 a8,8 0 0 1 -8,-8 v-36 a8,8 0 0 1 8,-8 z" />
+    <!-- خطوط متن -->
+    <path
+        android:strokeColor="#2E14171A" android:strokeWidth="3.5" android:strokeLineCap="round"
+        android:pathData="M43,40 L65,40" />
+    <path
+        android:strokeColor="#1F14171A" android:strokeWidth="3.5" android:strokeLineCap="round"
+        android:pathData="M43,48 L57,48" />
+    <!-- تیک ثبت -->
+    <path
+        android:strokeColor="#1F7A5C" android:strokeWidth="7"
+        android:strokeLineCap="round" android:strokeLineJoin="round"
+        android:pathData="M43,62 L50,69 L65,52" />
 </vector>

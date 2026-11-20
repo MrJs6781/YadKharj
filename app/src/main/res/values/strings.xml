@@ -1,4 +1,5 @@
 <resources>
-    <string name="app_name">یادخرج</string>
+    <string name="app_name">YadKharj</string>
+    <string name="app_tagline">یادداشت خرج‌های روزانه</string>
     <string name="widget_desc">خلاصهٔ خرج امروز و این هفته</string>
 </resources>
